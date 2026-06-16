@@ -1,0 +1,201 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #1e293b;
+  background-color: #f8fafc;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 bg-primary-800 text-white border-2 border-primary-800 hover:bg-primary-700 hover:border-primary-700 transition-all duration-150 font-medium;
+  }
+  
+  .btn-secondary {
+    @apply px-4 py-2 bg-white text-primary-800 border-2 border-primary-800 hover:bg-primary-50 transition-all duration-150 font-medium;
+  }
+  
+  .btn-success {
+    @apply px-4 py-2 bg-success-500 text-white border-2 border-success-500 hover:bg-success-600 hover:border-success-600 transition-all duration-150 font-medium;
+  }
+  
+  .btn-warning {
+    @apply px-4 py-2 bg-warning-500 text-white border-2 border-warning-500 hover:bg-warning-600 hover:border-warning-600 transition-all duration-150 font-medium;
+  }
+  
+  .card {
+    @apply bg-white border-2 border-primary-200 hover:border-primary-400 transition-all duration-150;
+  }
+  
+  .card-selected {
+    @apply border-success-500 shadow-lg shadow-success-500/10;
+  }
+  
+  .input-field {
+    @apply w-full px-3 py-2 border-2 border-primary-300 focus:border-primary-600 focus:outline-none transition-colors duration-150;
+  }
+  
+  .tag {
+    @apply inline-flex items-center px-2 py-0.5 text-xs font-medium border;
+  }
+  
+  .tag-success {
+    @apply bg-success-50 text-success-600 border-success-200;
+  }
+  
+  .tag-warning {
+    @apply bg-warning-50 text-warning-600 border-warning-200;
+  }
+  
+  .tag-danger {
+    @apply bg-red-50 text-red-600 border-red-200;
+  }
+  
+  .tag-default {
+    @apply bg-primary-50 text-primary-600 border-primary-200;
+  }
+  
+  .table-header {
+    @apply bg-primary-50 text-primary-800 font-semibold text-left px-4 py-3 border-b-2 border-primary-200;
+  }
+  
+  .table-cell {
+    @apply px-4 py-3 border-b border-primary-100;
+  }
+  
+  .nav-tab {
+    @apply px-4 py-3 text-sm font-medium border-b-2 border-transparent text-primary-500 hover:text-primary-800 hover:border-primary-300 transition-all duration-150 cursor-pointer;
+  }
+  
+  .nav-tab-active {
+    @apply text-primary-800 border-primary-800;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: #f1f5f9;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 3px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+  }
+  
+  .animate-fade-in {
+    animation: fadeIn 0.15s ease-out;
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  .animate-slide-down {
+    animation: slideDown 0.2s ease-out;
+  }
+  
+  @keyframes slideDown {
+    from { opacity: 0; max-height: 0; }
+    to { opacity: 1; max-height: 500px; }
+  }
+  
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-only {
+    display: block !important;
+  }
+  
+  body {
+    background: white;
+    color: black;
+  }
+  
+  .card {
+    border: 1px solid #000;
+    box-shadow: none;
+  }
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: #1e293b;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #1e293b;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #1e293b;
+  cursor: pointer;
+}
