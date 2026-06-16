@@ -257,6 +257,86 @@ export default function CompareList() {
     }
   };
 
+  const generateCustomerCardText = () => {
+    if (!currentModel) return '';
+
+    let text = `【${currentModel.name} 换屏方案建议书】\n\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    compareSchemes.forEach((scheme) => {
+      if (scheme.isRecommended) {
+        text += `⭐ ${scheme.name}（推荐）\n`;
+      } else {
+        text += `📍 ${scheme.name}\n`;
+      }
+      text += `💰 价格: ¥${scheme.price.toLocaleString()}\n`;
+      if (scheme.isOverBudget) {
+        text += `⚠️ 超预算: ¥${Math.abs(scheme.budgetDiff).toLocaleString()}\n`;
+      } else {
+        text += `✅ 省预算: ¥${Math.abs(scheme.budgetDiff).toLocaleString()}\n`;
+      }
+      text += `🔧 质保: ${scheme.warranty}\n`;
+      text += `👍 优点:\n`;
+      scheme.pros.forEach((pro) => {
+        text += `   - ${pro}\n`;
+      });
+      text += `⚠️ 注意:\n`;
+      scheme.cons.forEach((con) => {
+        text += `   - ${con}\n`;
+      });
+      text += `\n`;
+    });
+
+    text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    text += `💡 预算分析\n`;
+    text += `   客户预算: ¥${selection.budget.toLocaleString()}\n`;
+    const inBudget = compareSchemes.filter((s) => !s.isOverBudget).length;
+    const overBudget = compareSchemes.filter((s) => s.isOverBudget).length;
+    text += `   预算内方案: ${inBudget} 款\n`;
+    if (overBudget > 0) {
+      text += `   超预算方案: ${overBudget} 款\n`;
+    }
+    const recommended = compareSchemes.filter((s) => s.isRecommended);
+    if (recommended.length > 0) {
+      text += `   推荐选择: ${recommended.map((s) => s.name).join('、')}\n`;
+    }
+    text += `\n`;
+
+    if (selection.faceIdStatus !== 'all') {
+      text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      text += `👤 Face ID 提示\n`;
+      if (selection.faceIdStatus === 'abnormal') {
+        text += `   ⚠️ 状态: 异常\n`;
+        text += `   - 更换屏幕可能无法恢复面容功能\n`;
+        text += `   - 建议先检测故障原因\n`;
+        text += `   - 维修前请确认已知晓风险\n`;
+      } else {
+        text += `   ✅ 状态: 正常\n`;
+        text += `   - 维修时请注意排线保护\n`;
+        text += `   - 原装屏兼容性更好\n`;
+        text += `   - 维修后请当面测试\n`;
+      }
+      text += `\n`;
+    }
+
+    text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    text += `🔒 质保说明\n`;
+    compareSchemes.forEach((scheme) => {
+      text += `   ${scheme.name}: ${scheme.warranty}质保\n`;
+    });
+    text += `   质保范围: 屏幕显示异常、触控失灵、漏光等非人为质量问题\n\n`;
+
+    text += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    text += `📌 温馨提示\n`;
+    text += `   • 以上价格为参考价格，最终以门店实际报价为准\n`;
+    text += `   • 更换屏幕后请当面测试各项功能\n`;
+    text += `   • 建议选择正规维修渠道，确保维修质量\n`;
+    text += `   • 维修后请保留好维修凭证\n`;
+    text += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+    return text;
+  };
+
   const handleSave = () => {
     if (!currentModel || compareOptions.length === 0) return;
 
@@ -606,6 +686,110 @@ export default function CompareList() {
                 <li>• 原装屏幕支持原彩显示，第三方屏幕可能不支持</li>
                 <li>• 建议选择正规维修渠道，确保维修质量</li>
               </ul>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                <h4 className="font-semibold text-green-700 text-sm mb-2 flex items-center space-x-1.5">
+                  <CheckCircle2 size={16} />
+                  <span>预算分析</span>
+                </h4>
+                <p className="text-xs text-green-600">
+                  您的预算为 <span className="font-bold">¥{selection.budget.toLocaleString()}</span>
+                  {compareSchemes.filter((s) => !s.isOverBudget).length > 0 && (
+                    <>
+                      ，共 <span className="font-bold">{compareSchemes.filter((s) => !s.isOverBudget).length}</span> 款方案在预算范围内
+                    </>
+                  )}
+                  {compareSchemes.filter((s) => s.isOverBudget).length > 0 && (
+                    <>
+                      ，<span className="font-bold text-red-600">{compareSchemes.filter((s) => s.isOverBudget).length}</span> 款方案超出预算
+                    </>
+                  )}
+                </p>
+                {compareSchemes.filter((s) => s.isRecommended).length > 0 && (
+                  <p className="text-xs text-green-700 mt-2">
+                    💡 推荐选择：{compareSchemes.filter((s) => s.isRecommended).map((s) => s.name).join('、')}
+                  </p>
+                )}
+                {compareSchemes.filter((s) => s.isOverBudget).length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-green-200">
+                    <p className="text-xs font-medium text-yellow-700 mb-1">超预算方案说明：</p>
+                    <ul className="text-xs text-yellow-600 space-y-0.5">
+                      {compareSchemes.filter((s) => s.isOverBudget).map((scheme) => (
+                        <li key={scheme.id}>
+                          • {scheme.name}：超预算 ¥{Math.abs(scheme.budgetDiff).toLocaleString()}，主要贵在原装品质和显示效果
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {selection.faceIdStatus !== 'all' && (
+                <div className={cn(
+                  'p-4 rounded-lg border',
+                  selection.faceIdStatus === 'abnormal'
+                    ? 'bg-yellow-50 border-yellow-200'
+                    : 'bg-blue-50 border-blue-200'
+                )}>
+                  <h4 className={cn(
+                    'font-semibold text-sm mb-2 flex items-center space-x-1.5',
+                    selection.faceIdStatus === 'abnormal' ? 'text-yellow-700' : 'text-blue-700'
+                  )}>
+                    <Shield size={16} />
+                    <span>Face ID {selection.faceIdStatus === 'normal' ? '保护' : '风险'}提示</span>
+                  </h4>
+                  {selection.faceIdStatus === 'abnormal' ? (
+                    <ul className="text-xs text-yellow-600 space-y-1">
+                      <li>• 您的 Face ID 当前状态异常，更换屏幕可能无法恢复面容功能</li>
+                      <li>• 建议先检测故障原因，确认是否需要更换 Face ID 组件</li>
+                      <li>• 非原装屏幕可能触发系统面容检测机制，导致功能锁定</li>
+                      <li>• 维修前请确认已知晓相关风险</li>
+                    </ul>
+                  ) : (
+                    <ul className="text-xs text-blue-600 space-y-1">
+                      <li>• 您的 Face ID 功能正常，维修时请注意排线保护</li>
+                      <li>• 原装屏幕能更好地兼容面容识别功能</li>
+                      <li>• 建议选择有经验的维修师傅，避免操作不当损坏</li>
+                      <li>• 维修后请当面测试面容解锁是否正常</li>
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
+                <h4 className="font-semibold text-purple-700 text-sm mb-2 flex items-center space-x-1.5">
+                  <Clock size={16} />
+                  <span>质保说明</span>
+                </h4>
+                <div className="text-xs text-purple-600 space-y-1">
+                  {compareSchemes.map((scheme) => (
+                    <div key={scheme.id} className="flex items-start space-x-2">
+                      <span className="font-medium flex-shrink-0">{scheme.name}：</span>
+                      <span>{scheme.warranty}质保，质保期内非人为损坏免费更换</span>
+                    </div>
+                  ))}
+                  <p className="mt-2 pt-2 border-t border-purple-200">
+                    📌 质保范围：屏幕显示异常、触控失灵、漏光等非人为质量问题
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-center">
+              <button
+                onClick={() => {
+                  const text = generateCustomerCardText();
+                  navigator.clipboard.writeText(text);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="flex items-center space-x-2 px-6 py-3 bg-primary-700 text-white rounded-lg hover:bg-primary-800 transition-all shadow-md"
+              >
+                <Copy size={18} />
+                <span>{copied ? '已复制到剪贴板' : '一键复制说明卡'}</span>
+              </button>
             </div>
           </div>
         )}

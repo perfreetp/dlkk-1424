@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import type { AppState, SelectionParams, HistoryQuote, TestChecklistItem, ScreenGrade } from '../types';
+import type { AppState, SelectionParams, HistoryQuote, TestChecklistItem, ScreenGrade, WorkOrder, WorkOrderStatus, InventoryReservation } from '../types';
 import { storage, storageKeys } from '../utils/storage';
 import { generateId } from '../utils/formatter';
+import { getInventoryByModelAndGrade } from '../data/inventory';
 
 const defaultSelection: SelectionParams = {
   modelId: null,
@@ -49,6 +50,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   compareModelIds: [],
   favoriteNoteIds: [],
   historyQuotes: [],
+  workOrders: [],
+  inventoryReservations: [],
   testChecklist: defaultTestChecklist,
 
   setModelId: (modelId: string | null) => {
@@ -225,6 +228,160 @@ export const useAppStore = create<AppState>((set, get) => ({
     storage.remove(storageKeys.HISTORY_QUOTES);
   },
 
+  addWorkOrder: (order: Omit<WorkOrder, 'id' | 'createdAt' | 'updatedAt' | 'statusHistory'>) => {
+    set((state) => {
+      const now = new Date().toISOString();
+      const newOrder: WorkOrder = {
+        ...order,
+        id: generateId(),
+        createdAt: now,
+        updatedAt: now,
+        statusHistory: [{ status: order.status, timestamp: now }],
+      };
+      const newOrders = [newOrder, ...state.workOrders].slice(0, 100);
+      storage.set(storageKeys.WORK_ORDERS, newOrders);
+      return { workOrders: newOrders };
+    });
+  },
+
+  updateWorkOrderStatus: (id: string, status: WorkOrderStatus, remark?: string) => {
+    set((state) => {
+      const now = new Date().toISOString();
+      const newOrders = state.workOrders.map((order) => {
+        if (order.id !== id) return order;
+        return {
+          ...order,
+          status,
+          updatedAt: now,
+          deliveredAt: status === 'delivered' ? now : order.deliveredAt,
+          statusHistory: [
+            ...order.statusHistory,
+            { status, timestamp: now, remark },
+          ],
+        };
+      });
+      storage.set(storageKeys.WORK_ORDERS, newOrders);
+      return { workOrders: newOrders };
+    });
+  },
+
+  updateWorkOrder: (id: string, updates: Partial<WorkOrder>) => {
+    set((state) => {
+      const newOrders = state.workOrders.map((order) =>
+        order.id === id ? { ...order, ...updates, updatedAt: new Date().toISOString() } : order
+      );
+      storage.set(storageKeys.WORK_ORDERS, newOrders);
+      return { workOrders: newOrders };
+    });
+  },
+
+  removeWorkOrder: (id: string) => {
+    set((state) => {
+      const newOrders = state.workOrders.filter((order) => order.id !== id);
+      storage.set(storageKeys.WORK_ORDERS, newOrders);
+      return { workOrders: newOrders };
+    });
+  },
+
+  convertQuoteToWorkOrder: (quoteId: string): WorkOrder | null => {
+    const state = get();
+    const quote = state.historyQuotes.find((q) => q.id === quoteId);
+    if (!quote) return null;
+
+    const now = new Date().toISOString();
+    const newOrder: WorkOrder = {
+      id: generateId(),
+      quoteId: quote.id,
+      modelId: quote.modelId,
+      modelName: quote.modelName,
+      screenGrade: quote.screenGrade,
+      gradeName: quote.gradeName,
+      screenPrice: quote.screenPrice,
+      laborFee: quote.laborFee,
+      totalPrice: quote.totalPrice,
+      budget: state.selection.budget,
+      customerName: quote.customerName,
+      customerPhone: quote.customerPhone,
+      faultDescription: quote.faultDescription,
+      faceIdStatus: quote.faceIdStatus,
+      notes: quote.notes,
+      status: 'quoted',
+      statusHistory: [{ status: 'quoted', timestamp: now, remark: '从报价单转换' }],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    set((state) => {
+      const newOrders = [newOrder, ...state.workOrders].slice(0, 100);
+      storage.set(storageKeys.WORK_ORDERS, newOrders);
+      return { workOrders: newOrders };
+    });
+
+    return newOrder;
+  },
+
+  reserveInventory: (workOrderId: string, inventoryId: string, modelId: string, screenGrade: ScreenGrade, quantity: number): boolean => {
+    const state = get();
+    const available = state.getAvailableQuantity(modelId, screenGrade);
+    if (quantity > available) return false;
+
+    const newReservation: InventoryReservation = {
+      id: generateId(),
+      inventoryId,
+      workOrderId,
+      modelId,
+      screenGrade,
+      quantity,
+      status: 'reserved',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    set((state) => {
+      const newReservations = [newReservation, ...state.inventoryReservations];
+      storage.set(storageKeys.INVENTORY_RESERVATIONS, newReservations);
+      return { inventoryReservations: newReservations };
+    });
+
+    return true;
+  },
+
+  releaseInventory: (reservationId: string) => {
+    set((state) => {
+      const newReservations = state.inventoryReservations.map((r) =>
+        r.id === reservationId
+          ? { ...r, status: 'released' as const, updatedAt: new Date().toISOString() }
+          : r
+      );
+      storage.set(storageKeys.INVENTORY_RESERVATIONS, newReservations);
+      return { inventoryReservations: newReservations };
+    });
+  },
+
+  deductInventory: (reservationId: string) => {
+    set((state) => {
+      const newReservations = state.inventoryReservations.map((r) =>
+        r.id === reservationId
+          ? { ...r, status: 'deducted' as const, updatedAt: new Date().toISOString() }
+          : r
+      );
+      storage.set(storageKeys.INVENTORY_RESERVATIONS, newReservations);
+      return { inventoryReservations: newReservations };
+    });
+  },
+
+  getAvailableQuantity: (modelId: string, screenGrade: ScreenGrade): number => {
+    const state = get();
+    const inventory = getInventoryByModelAndGrade(modelId, screenGrade);
+    if (!inventory) return 0;
+
+    const reservedQuantity = state.inventoryReservations
+      .filter((r) => r.modelId === modelId && r.screenGrade === screenGrade && r.status === 'reserved')
+      .reduce((sum, r) => sum + r.quantity, 0);
+
+    return Math.max(0, inventory.quantity - reservedQuantity);
+  },
+
   updateTestChecklist: (id: string, updates: Partial<Omit<TestChecklistItem, 'id' | 'category'>>) => {
     set((state) => ({
       testChecklist: state.testChecklist.map((item) =>
@@ -244,6 +401,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const compare = storage.get<string[]>(storageKeys.COMPARE_MODELS, []);
     const favoriteNotes = storage.get<string[]>(storageKeys.FAVORITE_NOTES, []);
     const history = storage.get<HistoryQuote[]>(storageKeys.HISTORY_QUOTES, []);
+    const workOrders = storage.get<WorkOrder[]>(storageKeys.WORK_ORDERS, []);
+    const inventoryReservations = storage.get<InventoryReservation[]>(storageKeys.INVENTORY_RESERVATIONS, []);
 
     set({
       selection: { ...defaultSelection, ...selection, compareGrades: selection.compareGrades || [] },
@@ -252,6 +411,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       compareModelIds: compare,
       favoriteNoteIds: favoriteNotes,
       historyQuotes: history,
+      workOrders,
+      inventoryReservations,
     });
   },
 }));
@@ -262,6 +423,8 @@ export const selectFavoriteModelIds = (state: AppState) => state.favoriteModelId
 export const selectCompareModelIds = (state: AppState) => state.compareModelIds;
 export const selectFavoriteNoteIds = (state: AppState) => state.favoriteNoteIds;
 export const selectHistoryQuotes = (state: AppState) => state.historyQuotes;
+export const selectWorkOrders = (state: AppState) => state.workOrders;
+export const selectInventoryReservations = (state: AppState) => state.inventoryReservations;
 export const selectTestChecklist = (state: AppState) => state.testChecklist;
 
 export const selectIsModelPinned = (modelId: string) => (state: AppState) =>

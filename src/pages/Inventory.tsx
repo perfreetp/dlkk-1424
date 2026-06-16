@@ -25,13 +25,20 @@ import {
   Trash2,
   Eye,
   Save,
+  Wrench,
+  Clock,
+  CheckCircle,
+  XCircle,
+  RotateCcw,
+  ArrowRight,
+  Shield,
 } from 'lucide-react';
 import Layout from '@/components/Layout';
-import { useAppStore, selectHistoryQuotes, selectSelection } from '@/store/useAppStore';
+import { useAppStore, selectHistoryQuotes, selectSelection, selectWorkOrders, selectInventoryReservations } from '@/store/useAppStore';
 import { iphoneModels } from '@/data/models';
 import { inventoryItems, getInventoryByModelAndGrade } from '@/data/inventory';
 import { getScreenOption } from '@/data/screenOptions';
-import type { InventoryItem, ScreenGrade, HistoryQuote } from '@/types';
+import type { InventoryItem, ScreenGrade, HistoryQuote, WorkOrder, WorkOrderStatus } from '@/types';
 import { cn } from '@/lib/utils';
 import { generateId } from '@/utils/formatter';
 
@@ -67,6 +74,14 @@ const gradeColors: Record<string, string> = {
   'lcd-replacement': 'bg-primary-100 text-primary-500 border-primary-200',
 };
 
+const workOrderStatusConfig: Record<WorkOrderStatus, { label: string; color: string; bgColor: string; icon: React.ReactNode }> = {
+  'pending': { label: '待检测', color: 'text-blue-700', bgColor: 'bg-blue-50 border-blue-200', icon: <Clock size={14} /> },
+  'quoted': { label: '已报价', color: 'text-yellow-700', bgColor: 'bg-yellow-50 border-yellow-200', icon: <DollarSign size={14} /> },
+  'repairing': { label: '维修中', color: 'text-purple-700', bgColor: 'bg-purple-50 border-purple-200', icon: <Wrench size={14} /> },
+  'delivered': { label: '已交付', color: 'text-green-700', bgColor: 'bg-green-50 border-green-200', icon: <CheckCircle size={14} /> },
+  'cancelled': { label: '已取消', color: 'text-gray-600', bgColor: 'bg-gray-50 border-gray-200', icon: <XCircle size={14} /> },
+};
+
 const defaultFormData: QuoteFormData = {
   modelId: '',
   screenGrade: '',
@@ -79,6 +94,7 @@ const defaultFormData: QuoteFormData = {
 
 export default function Inventory() {
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<'inventory' | 'work-orders'>('inventory');
   const [modelFilter, setModelFilter] = useState<string>('all');
   const [gradeFilter, setGradeFilter] = useState<string>('all');
   const [supplierFilter, setSupplierFilter] = useState<string>('all');
@@ -88,15 +104,31 @@ export default function Inventory() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
   const [showQuoteDetailModal, setShowQuoteDetailModal] = useState(false);
+  const [showWorkOrderDetailModal, setShowWorkOrderDetailModal] = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<HistoryQuote | null>(null);
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<WorkOrder | null>(null);
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [historySearchType, setHistorySearchType] = useState<'all' | 'customer' | 'model'>('all');
+  const [workOrderSearchQuery, setWorkOrderSearchQuery] = useState('');
+  const [workOrderStatusFilter, setWorkOrderStatusFilter] = useState<WorkOrderStatus | 'all'>('all');
   const [formData, setFormData] = useState<QuoteFormData>(defaultFormData);
   const [quoteSaved, setQuoteSaved] = useState(false);
 
   const historyQuotes = useAppStore(selectHistoryQuotes);
+  const workOrders = useAppStore(selectWorkOrders);
+  const inventoryReservations = useAppStore(selectInventoryReservations);
   const selection = useAppStore(selectSelection);
-  const { addHistoryQuote, removeHistoryQuote } = useAppStore();
+  const {
+    addHistoryQuote,
+    removeHistoryQuote,
+    addWorkOrder,
+    updateWorkOrderStatus,
+    convertQuoteToWorkOrder,
+    reserveInventory,
+    releaseInventory,
+    deductInventory,
+    getAvailableQuantity,
+  } = useAppStore();
 
   const suppliers = useMemo(() => {
     const uniqueSuppliers = [...new Set(inventoryItems.map((item) => item.supplier))];
@@ -308,6 +340,67 @@ export default function Inventory() {
     }
   };
 
+  const handleConvertToWorkOrder = (quote: HistoryQuote) => {
+    const workOrder = convertQuoteToWorkOrder(quote.id);
+    if (workOrder) {
+      const inventoryItem = getInventoryByModelAndGrade(quote.modelId, quote.screenGrade);
+      if (inventoryItem) {
+        reserveInventory(workOrder.id, inventoryItem.id, quote.modelId, quote.screenGrade, 1);
+      }
+      setShowQuoteDetailModal(false);
+      setSelectedWorkOrder(workOrder);
+      setShowWorkOrderDetailModal(true);
+    }
+  };
+
+  const handleViewWorkOrderDetail = (order: WorkOrder) => {
+    setSelectedWorkOrder(order);
+    setShowWorkOrderDetailModal(true);
+  };
+
+  const handleUpdateWorkOrderStatus = (orderId: string, newStatus: WorkOrderStatus, remark?: string) => {
+    updateWorkOrderStatus(orderId, newStatus, remark);
+    
+    if (newStatus === 'cancelled') {
+      const reservation = inventoryReservations.find((r) => r.workOrderId === orderId && r.status === 'reserved');
+      if (reservation) {
+        releaseInventory(reservation.id);
+      }
+    } else if (newStatus === 'delivered') {
+      const reservation = inventoryReservations.find((r) => r.workOrderId === orderId && r.status === 'reserved');
+      if (reservation) {
+        deductInventory(reservation.id);
+      }
+    }
+    
+    if (selectedWorkOrder?.id === orderId) {
+      const updatedOrder = workOrders.find((o) => o.id === orderId);
+      if (updatedOrder) {
+        setSelectedWorkOrder({ ...updatedOrder });
+      }
+    }
+  };
+
+  const filteredWorkOrders = useMemo(() => {
+    let orders = workOrders;
+    
+    if (workOrderStatusFilter !== 'all') {
+      orders = orders.filter((o) => o.status === workOrderStatusFilter);
+    }
+    
+    if (workOrderSearchQuery.trim()) {
+      const query = workOrderSearchQuery.toLowerCase();
+      orders = orders.filter((o) =>
+        o.modelName.toLowerCase().includes(query) ||
+        o.customerName?.toLowerCase().includes(query) ||
+        o.customerPhone?.includes(query) ||
+        o.gradeName.toLowerCase().includes(query)
+      );
+    }
+    
+    return orders;
+  }, [workOrders, workOrderStatusFilter, workOrderSearchQuery]);
+
   const getBudgetDiff = (price: number, budget: number) => {
     return price - budget;
   };
@@ -348,6 +441,40 @@ export default function Inventory() {
           </div>
         </div>
 
+        <div className="bg-white rounded-xl border border-primary-200 p-1 shadow-sm">
+          <div className="flex space-x-1">
+            <button
+              onClick={() => setActiveTab('inventory')}
+              className={cn(
+                'flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all',
+                activeTab === 'inventory'
+                  ? 'bg-success text-white shadow-md'
+                  : 'text-primary-600 hover:bg-primary-50'
+              )}
+            >
+              <Package size={16} />
+              <span>库存报价</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('work-orders')}
+              className={cn(
+                'flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all',
+                activeTab === 'work-orders'
+                  ? 'bg-success text-white shadow-md'
+                  : 'text-primary-600 hover:bg-primary-50'
+              )}
+            >
+              <ClipboardList size={16} />
+              <span>维修工单</span>
+              {workOrders.filter((o) => o.status === 'pending' || o.status === 'repairing').length > 0 && (
+                <span className="px-1.5 py-0.5 text-xs rounded-full bg-red-500 text-white">
+                  {workOrders.filter((o) => o.status === 'pending' || o.status === 'repairing').length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
         {selection.modelId && (
           <div className="bg-primary-50 rounded-xl border border-primary-200 p-4">
             <div className="flex items-center justify-between">
@@ -379,7 +506,9 @@ export default function Inventory() {
           </div>
         )}
 
-        <div className="bg-white rounded-xl border border-primary-200 p-5 shadow-sm">
+        {activeTab === 'inventory' && (
+          <>
+            <div className="bg-white rounded-xl border border-primary-200 p-5 shadow-sm">
           <div className="flex items-center space-x-2 mb-4">
             <Filter size={18} className="text-primary-500" />
             <span className="font-medium text-primary-700">筛选条件</span>
@@ -731,6 +860,122 @@ export default function Inventory() {
             </div>
           )}
         </div>
+        </>
+      )}
+
+      {activeTab === 'work-orders' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-primary-200 p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex bg-primary-100 rounded-lg p-1">
+                {(['all', 'pending', 'quoted', 'repairing', 'delivered', 'cancelled'] as const).map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setWorkOrderStatusFilter(status)}
+                    className={cn(
+                      'px-3 py-1.5 text-xs font-medium rounded-md transition-all',
+                      workOrderStatusFilter === status
+                        ? 'bg-white text-primary-800 shadow-sm'
+                        : 'text-primary-500 hover:text-primary-700'
+                    )}
+                  >
+                    {status === 'all' ? '全部' : workOrderStatusConfig[status].label}
+                    {status !== 'all' && (
+                      <span className="ml-1">
+                        ({workOrders.filter((o) => o.status === status).length})
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 min-w-[200px] relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-primary-400" />
+                <input
+                  type="text"
+                  placeholder="搜索工单、客户、机型..."
+                  value={workOrderSearchQuery}
+                  onChange={(e) => setWorkOrderSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm text-primary-800 placeholder-primary-400 focus:outline-none focus:ring-2 focus:ring-success/30 focus:border-success transition-all"
+                />
+              </div>
+            </div>
+          </div>
+
+          {filteredWorkOrders.length === 0 ? (
+            <div className="bg-white rounded-xl border border-primary-200 p-12 text-center shadow-sm">
+              <ClipboardList size={48} className="mx-auto text-primary-300 mb-3" />
+              <p className="text-primary-500">暂无维修工单</p>
+              <p className="text-xs text-primary-400 mt-1">从历史报价中可将报价单转为工单</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredWorkOrders.map((order) => {
+                const statusConfig = workOrderStatusConfig[order.status];
+                return (
+                  <div
+                    key={order.id}
+                    className="bg-white rounded-xl border border-primary-200 p-4 shadow-sm hover:border-success/50 transition-colors cursor-pointer"
+                    onClick={() => handleViewWorkOrderDetail(order)}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center space-x-2">
+                          <h4 className="font-semibold text-primary-800 truncate">{order.modelName}</h4>
+                          <span className={cn(
+                            'text-xs font-bold px-2 py-0.5 rounded border',
+                            gradeColors[order.screenGrade]
+                          )}>
+                            {order.gradeName}
+                          </span>
+                          <span className={cn(
+                            'inline-flex items-center space-x-1 text-xs px-2 py-0.5 rounded border',
+                            statusConfig.bgColor,
+                            statusConfig.color
+                          )}>
+                            {statusConfig.icon}
+                            <span>{statusConfig.label}</span>
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-primary-500">
+                          <span className="flex items-center space-x-1">
+                            <Calendar size={12} />
+                            <span>{new Date(order.createdAt).toLocaleString('zh-CN')}</span>
+                          </span>
+                          {order.customerName && (
+                            <span className="flex items-center space-x-1">
+                              <User size={12} />
+                              <span>{order.customerName}</span>
+                            </span>
+                          )}
+                          {order.customerPhone && (
+                            <span className="flex items-center space-x-1">
+                              <Phone size={12} />
+                              <span>{order.customerPhone}</span>
+                            </span>
+                          )}
+                        </div>
+                        {order.faultDescription && (
+                          <p className="text-xs text-primary-600 mt-2 line-clamp-1">
+                            故障：{order.faultDescription}
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-right ml-4 flex-shrink-0">
+                        <div className="text-xl font-bold font-mono text-success">
+                          ¥{order.totalPrice.toLocaleString()}
+                        </div>
+                        <div className="text-[10px] text-primary-400 mt-1">
+                          屏幕 ¥{order.screenPrice?.toLocaleString() || '0'} + 人工 ¥{order.laborFee?.toLocaleString() || '0'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
       </div>
 
       {showQuoteModal && (
@@ -1258,6 +1503,255 @@ export default function Inventory() {
                     <p className="text-sm text-primary-600">{selectedQuote.notes}</p>
                   </div>
                 )}
+
+                <div className="pt-4 border-t border-primary-200">
+                  <button
+                    onClick={() => handleConvertToWorkOrder(selectedQuote)}
+                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-success text-white rounded-lg hover:bg-success/90 transition-all shadow-md"
+                  >
+                    <Wrench size={18} />
+                    <span className="font-medium">转为维修工单</span>
+                    <ArrowRight size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWorkOrderDetailModal && selectedWorkOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
+            <div className="px-6 py-4 border-b border-primary-200 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <h3 className="text-lg font-semibold text-primary-800 flex items-center space-x-2">
+                  <ClipboardList size={18} />
+                  <span>工单详情</span>
+                </h3>
+                <span className={cn(
+                  'inline-flex items-center space-x-1 text-xs px-2.5 py-1 rounded-full border',
+                  workOrderStatusConfig[selectedWorkOrder.status].bgColor,
+                  workOrderStatusConfig[selectedWorkOrder.status].color
+                )}>
+                  {workOrderStatusConfig[selectedWorkOrder.status].icon}
+                  <span>{workOrderStatusConfig[selectedWorkOrder.status].label}</span>
+                </span>
+              </div>
+              <button
+                onClick={() => setShowWorkOrderDetailModal(false)}
+                className="p-2 rounded-lg hover:bg-primary-100 transition-colors"
+              >
+                <X size={18} className="text-primary-500" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+              <div className="space-y-5">
+                <div className="bg-primary-50 rounded-lg p-4 border border-primary-200">
+                  <h4 className="text-sm font-semibold text-primary-700 mb-3">基本信息</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-primary-500">工单号</span>
+                      <p className="font-mono text-primary-800 mt-0.5">{selectedWorkOrder.id}</p>
+                    </div>
+                    <div>
+                      <span className="text-primary-500">创建时间</span>
+                      <p className="text-primary-800 mt-0.5">{new Date(selectedWorkOrder.createdAt).toLocaleString('zh-CN')}</p>
+                    </div>
+                    <div>
+                      <span className="text-primary-500">机型</span>
+                      <p className="font-medium text-primary-800 mt-0.5">{selectedWorkOrder.modelName}</p>
+                    </div>
+                    <div>
+                      <span className="text-primary-500">屏幕等级</span>
+                      <p className="font-medium text-primary-800 mt-0.5">{selectedWorkOrder.gradeName}</p>
+                    </div>
+                    {selectedWorkOrder.deliveredAt && (
+                      <div>
+                        <span className="text-primary-500">交付时间</span>
+                        <p className="text-primary-800 mt-0.5">{new Date(selectedWorkOrder.deliveredAt).toLocaleString('zh-CN')}</p>
+                      </div>
+                    )}
+                    {selectedWorkOrder.budget > 0 && (
+                      <div>
+                        <span className="text-primary-500">客户预算</span>
+                        <p className={cn(
+                          'font-mono font-semibold mt-0.5',
+                          selectedWorkOrder.totalPrice > selectedWorkOrder.budget ? 'text-red-500' : 'text-success'
+                        )}>
+                          ¥{selectedWorkOrder.budget.toLocaleString()}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {selectedWorkOrder.customerName && (
+                  <div className="bg-white rounded-lg p-4 border border-primary-200">
+                    <h4 className="text-sm font-semibold text-primary-700 mb-3">客户信息</h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-primary-500">客户姓名</span>
+                        <p className="font-medium text-primary-800 mt-0.5">{selectedWorkOrder.customerName}</p>
+                      </div>
+                      {selectedWorkOrder.customerPhone && (
+                        <div>
+                          <span className="text-primary-500">联系电话</span>
+                          <p className="font-mono text-primary-800 mt-0.5">{selectedWorkOrder.customerPhone}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {selectedWorkOrder.faultDescription && (
+                  <div className="bg-white rounded-lg p-4 border border-primary-200">
+                    <h4 className="text-sm font-semibold text-primary-700 mb-2">故障描述</h4>
+                    <p className="text-sm text-primary-600">{selectedWorkOrder.faultDescription}</p>
+                  </div>
+                )}
+
+                {selectedWorkOrder.faceIdStatus && (
+                  <div className={cn(
+                    'rounded-lg p-4 border',
+                    selectedWorkOrder.faceIdStatus === 'abnormal'
+                      ? 'bg-warning/10 border-warning/30'
+                      : 'bg-success/10 border-success/30'
+                  )}>
+                    <h4 className={cn(
+                      'text-sm font-semibold mb-2 flex items-center space-x-2',
+                      selectedWorkOrder.faceIdStatus === 'abnormal' ? 'text-warning-700' : 'text-success-700'
+                    )}>
+                      <Shield size={14} />
+                      <span>Face ID 状态：{selectedWorkOrder.faceIdStatus === 'normal' ? '正常' : '异常'}</span>
+                    </h4>
+                    <p className="text-sm text-primary-600">
+                      {selectedWorkOrder.faceIdStatus === 'abnormal'
+                        ? '更换屏幕时需特别注意排线保护，避免进一步损坏 Face ID 组件。建议在更换前向客户说明风险。'
+                        : '请提醒客户保护好面容识别组件，更换时注意排线操作，避免损坏。'}
+                    </p>
+                  </div>
+                )}
+
+                <div className="bg-primary-50 rounded-lg p-4 border border-primary-200">
+                  <h4 className="text-sm font-semibold text-primary-700 mb-3">费用明细</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-primary-600">屏幕配件</span>
+                      <span className="font-mono text-primary-800">¥{selectedWorkOrder.screenPrice?.toLocaleString() || '0'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-primary-600">人工费</span>
+                      <span className="font-mono text-primary-800">¥{selectedWorkOrder.laborFee?.toLocaleString() || '0'}</span>
+                    </div>
+                    {selectedWorkOrder.budget > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-primary-600">预算差额</span>
+                        <span className={cn(
+                          'font-mono',
+                          selectedWorkOrder.totalPrice > selectedWorkOrder.budget ? 'text-red-500' : 'text-green-600'
+                        )}>
+                          {selectedWorkOrder.totalPrice > selectedWorkOrder.budget ? '超' : '省'} ¥{Math.abs(selectedWorkOrder.totalPrice - selectedWorkOrder.budget).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                    <div className="pt-2 border-t border-primary-200 flex justify-between">
+                      <span className="font-semibold text-primary-800">合计</span>
+                      <span className="text-2xl font-bold font-mono text-success">
+                        ¥{selectedWorkOrder.totalPrice.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedWorkOrder.notes && (
+                  <div className="bg-white rounded-lg p-4 border border-primary-200">
+                    <h4 className="text-sm font-semibold text-primary-700 mb-2">备注</h4>
+                    <p className="text-sm text-primary-600">{selectedWorkOrder.notes}</p>
+                  </div>
+                )}
+
+                {selectedWorkOrder.statusHistory.length > 0 && (
+                  <div className="bg-white rounded-lg p-4 border border-primary-200">
+                    <h4 className="text-sm font-semibold text-primary-700 mb-3">状态流转</h4>
+                    <div className="space-y-3">
+                      {selectedWorkOrder.statusHistory.map((item, idx) => (
+                        <div key={idx} className="flex items-start space-x-3">
+                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center">
+                            {workOrderStatusConfig[item.status].icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <span className={cn('text-sm font-medium', workOrderStatusConfig[item.status].color)}>
+                                {workOrderStatusConfig[item.status].label}
+                              </span>
+                              <span className="text-xs text-primary-400">
+                                {new Date(item.timestamp).toLocaleString('zh-CN')}
+                              </span>
+                            </div>
+                            {item.remark && (
+                              <p className="text-xs text-primary-500 mt-1">{item.remark}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-4 border-t border-primary-200">
+                  <div className="flex flex-wrap gap-2">
+                    {selectedWorkOrder.status === 'quoted' && (
+                      <button
+                        onClick={() => handleUpdateWorkOrderStatus(selectedWorkOrder.id, 'repairing', '开始维修')}
+                        className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
+                      >
+                        <Wrench size={16} />
+                        <span>开始维修</span>
+                      </button>
+                    )}
+                    {selectedWorkOrder.status === 'pending' && (
+                      <button
+                        onClick={() => handleUpdateWorkOrderStatus(selectedWorkOrder.id, 'quoted', '检测完成，已报价')}
+                        className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-all"
+                      >
+                        <DollarSign size={16} />
+                        <span>已报价</span>
+                      </button>
+                    )}
+                    {selectedWorkOrder.status === 'repairing' && (
+                      <button
+                        onClick={() => handleUpdateWorkOrderStatus(selectedWorkOrder.id, 'delivered', '维修完成，已交付')}
+                        className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-success text-white rounded-lg hover:bg-success/90 transition-all"
+                      >
+                        <CheckCircle size={16} />
+                        <span>完成交付</span>
+                      </button>
+                    )}
+                    {(selectedWorkOrder.status === 'pending' || selectedWorkOrder.status === 'quoted') && (
+                      <button
+                        onClick={() => {
+                          if (confirm('确定要取消这个工单吗？')) {
+                            handleUpdateWorkOrderStatus(selectedWorkOrder.id, 'cancelled', '客户取消');
+                          }
+                        }}
+                        className="flex items-center justify-center space-x-2 px-4 py-2.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-all"
+                      >
+                        <XCircle size={16} />
+                        <span>取消工单</span>
+                      </button>
+                    )}
+                    {(selectedWorkOrder.status === 'cancelled' || selectedWorkOrder.status === 'delivered') && (
+                      <button
+                        onClick={() => setShowWorkOrderDetailModal(false)}
+                        className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-primary-100 text-primary-600 rounded-lg hover:bg-primary-200 transition-all"
+                      >
+                        <ArrowRight size={16} />
+                        <span>关闭</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

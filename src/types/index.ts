@@ -104,6 +104,48 @@ export type HistoryQuote = {
   notes?: string;
 };
 
+export type WorkOrderStatus = 'pending' | 'quoted' | 'repairing' | 'delivered' | 'cancelled';
+
+export type WorkOrder = {
+  id: string;
+  quoteId?: string;
+  modelId: string;
+  modelName: string;
+  screenGrade: ScreenGrade;
+  gradeName: string;
+  screenPrice: number;
+  laborFee: number;
+  totalPrice: number;
+  budget: number;
+  customerName?: string;
+  customerPhone?: string;
+  faultDescription?: string;
+  faceIdStatus?: 'normal' | 'abnormal';
+  notes?: string;
+  status: WorkOrderStatus;
+  statusHistory: { status: WorkOrderStatus; timestamp: string; remark?: string }[];
+  inventoryReserved?: {
+    inventoryId: string;
+    quantity: number;
+    reservedAt: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+  deliveredAt?: string;
+};
+
+export type InventoryReservation = {
+  id: string;
+  inventoryId: string;
+  workOrderId: string;
+  modelId: string;
+  screenGrade: ScreenGrade;
+  quantity: number;
+  status: 'reserved' | 'released' | 'deducted';
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type TestChecklistItem = {
   id: string;
   name: string;
@@ -120,6 +162,8 @@ export type AppState = {
   compareModelIds: string[];
   favoriteNoteIds: string[];
   historyQuotes: HistoryQuote[];
+  workOrders: WorkOrder[];
+  inventoryReservations: InventoryReservation[];
   testChecklist: TestChecklistItem[];
 
   setModelId: (modelId: string | null) => void;
@@ -143,6 +187,17 @@ export type AppState = {
   addHistoryQuote: (quote: Omit<HistoryQuote, 'id' | 'createdAt'>) => void;
   removeHistoryQuote: (id: string) => void;
   clearHistoryQuotes: () => void;
+
+  addWorkOrder: (order: Omit<WorkOrder, 'id' | 'createdAt' | 'updatedAt' | 'statusHistory'>) => void;
+  updateWorkOrderStatus: (id: string, status: WorkOrderStatus, remark?: string) => void;
+  updateWorkOrder: (id: string, updates: Partial<WorkOrder>) => void;
+  removeWorkOrder: (id: string) => void;
+  convertQuoteToWorkOrder: (quoteId: string) => WorkOrder | null;
+
+  reserveInventory: (workOrderId: string, inventoryId: string, modelId: string, screenGrade: ScreenGrade, quantity: number) => boolean;
+  releaseInventory: (reservationId: string) => void;
+  deductInventory: (reservationId: string) => void;
+  getAvailableQuantity: (modelId: string, screenGrade: ScreenGrade) => number;
 
   updateTestChecklist: (id: string, updates: Partial<Omit<TestChecklistItem, 'id' | 'category'>>) => void;
   resetTestChecklist: () => void;
