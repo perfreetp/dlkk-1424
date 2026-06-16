@@ -64,6 +64,7 @@ export const storageKeys = {
   PINNED_MODELS: 'pinned-models',
   FAVORITE_MODELS: 'favorite-models',
   COMPARE_MODELS: 'compare-models',
+  FAVORITE_NOTES: 'favorite-notes',
   HISTORY_QUOTES: 'history-quotes',
   THEME: 'theme',
 } as const;

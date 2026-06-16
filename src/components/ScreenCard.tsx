@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Check, AlertTriangle, Shield, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ProgressBar from "./ProgressBar";
@@ -18,6 +17,7 @@ interface ScreenCardProps {
   riskTips?: string[];
   price: number;
   isSelected?: boolean;
+  isDisabled?: boolean;
   onSelect?: (id: string, selected: boolean) => void;
 }
 
@@ -36,23 +36,24 @@ export default function ScreenCard({
   riskTips,
   price,
   isSelected = false,
+  isDisabled = false,
   onSelect,
 }: ScreenCardProps) {
-  const [isChecked, setIsChecked] = useState(isSelected);
   const colorConfig = gradeColors[gradeLevel];
 
   const handleCheckboxChange = () => {
-    const newValue = !isChecked;
-    setIsChecked(newValue);
-    onSelect?.(id, newValue);
+    if (isDisabled) return;
+    onSelect?.(id, !isSelected);
   };
 
   return (
     <div
       className={cn(
         "relative p-5 rounded-xl border-2 transition-all duration-200 bg-white",
-        isChecked
+        isSelected
           ? "border-success shadow-lg shadow-success/10"
+          : isDisabled
+          ? "border-primary-200 opacity-60"
           : "border-primary-200 hover:border-primary-300 hover:shadow-md"
       )}
     >
@@ -84,22 +85,28 @@ export default function ScreenCard({
           </div>
         </div>
 
-        <label className="flex items-center cursor-pointer">
+        <label className={cn(
+          "flex items-center",
+          isDisabled ? "cursor-not-allowed" : "cursor-pointer"
+        )}>
           <input
             type="checkbox"
-            checked={isChecked}
+            checked={isSelected}
             onChange={handleCheckboxChange}
+            disabled={isDisabled}
             className="sr-only"
           />
           <div
             className={cn(
               "w-5 h-5 rounded border-2 flex items-center justify-center transition-all",
-              isChecked
+              isSelected
                 ? "bg-success border-success"
+                : isDisabled
+                ? "bg-primary-100 border-primary-200"
                 : "border-primary-300 hover:border-primary-400"
             )}
           >
-            {isChecked && <Check size={14} className="text-white" />}
+            {isSelected && <Check size={14} className="text-white" />}
           </div>
         </label>
       </div>

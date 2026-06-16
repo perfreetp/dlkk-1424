@@ -80,6 +80,11 @@ export type SelectionParams = {
   screenGrade: ScreenGrade | null;
   includeCompatibility: boolean;
   includeInventory: boolean;
+  region: 'all' | 'china' | 'global';
+  faceIdStatus: 'all' | 'normal' | 'abnormal';
+  originalScreenType: 'all' | 'oled' | 'lcd';
+  budget: number;
+  compareGrades: ScreenGrade[];
 };
 
 export type HistoryQuote = {
@@ -108,6 +113,7 @@ export type AppState = {
   pinnedModelIds: string[];
   favoriteModelIds: string[];
   compareModelIds: string[];
+  favoriteNoteIds: string[];
   historyQuotes: HistoryQuote[];
   testChecklist: TestChecklistItem[];
 
@@ -115,12 +121,19 @@ export type AppState = {
   setScreenGrade: (grade: ScreenGrade | null) => void;
   setIncludeCompatibility: (value: boolean) => void;
   setIncludeInventory: (value: boolean) => void;
+  setRegion: (region: 'all' | 'china' | 'global') => void;
+  setFaceIdStatus: (status: 'all' | 'normal' | 'abnormal') => void;
+  setOriginalScreenType: (type: 'all' | 'oled' | 'lcd') => void;
+  setBudget: (budget: number) => void;
+  toggleCompareGrade: (grade: ScreenGrade) => void;
+  clearCompareGrades: () => void;
   resetSelection: () => void;
 
   togglePinnedModel: (modelId: string) => void;
   toggleFavoriteModel: (modelId: string) => void;
   toggleCompareModel: (modelId: string) => void;
   clearCompareModels: () => void;
+  toggleFavoriteNote: (noteId: string) => void;
 
   addHistoryQuote: (quote: Omit<HistoryQuote, 'id' | 'createdAt'>) => void;
   removeHistoryQuote: (id: string) => void;

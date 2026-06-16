@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   Shield,
@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import Layout from '@/components/Layout';
 import CompareCard from '@/components/CompareCard';
-import { useAppStore, selectSelection } from '@/store/useAppStore';
+import { useAppStore, selectSelection, selectCompareGrades } from '@/store/useAppStore';
 import { getModelById } from '@/data/models';
 import { getScreenOption } from '@/data/screenOptions';
 import type { ScreenGrade, ScreenOption, HistoryQuote } from '@/types';
@@ -85,29 +85,18 @@ const touchSensitivityMap: Record<string, number> = {
 
 export default function CompareList() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const [showCustomerCard, setShowCustomerCard] = useState(false);
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const selection = useAppStore(selectSelection);
+  const compareGrades = useAppStore(selectCompareGrades);
   const { addHistoryQuote } = useAppStore();
 
   const currentModel = useMemo(() => {
     if (!selection.modelId) return null;
     return getModelById(selection.modelId);
   }, [selection.modelId]);
-
-  const compareGrades = useMemo(() => {
-    const grades: ScreenGrade[] = [];
-    for (let i = 1; i <= 3; i++) {
-      const grade = searchParams.get(`grade${i}`) as ScreenGrade | null;
-      if (grade) {
-        grades.push(grade);
-      }
-    }
-    return grades;
-  }, [searchParams]);
 
   const compareOptions = useMemo(() => {
     if (!selection.modelId || compareGrades.length < 2) return [];

@@ -1,13 +1,12 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Smartphone, Shield, AlertTriangle, Check, Wallet, ListChecks } from 'lucide-react';
 import Layout from '@/components/Layout';
 import ScreenCard from '@/components/ScreenCard';
 import ProgressBar from '@/components/ProgressBar';
-import { useAppStore, selectSelection } from '@/store/useAppStore';
+import { useAppStore, selectSelection, selectCompareGradesCount } from '@/store/useAppStore';
 import { getModelById } from '@/data/models';
 import { getScreenOptionsByModelId } from '@/data/screenOptions';
-import { getScreenOption } from '@/data/screenOptions';
 import type { ScreenGrade, ScreenOption } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -40,12 +39,13 @@ interface ScreenParam {
 
 export default function ScreenOptions() {
   const navigate = useNavigate();
-  const [budget, setBudget] = useState(3000);
-  const [compareList, setCompareList] = useState<ScreenGrade[]>([]);
-  const [localBudget, setLocalBudget] = useState(3000);
-
   const selection = useAppStore(selectSelection);
-  const { setScreenGrade } = useAppStore();
+  const compareCount = useAppStore(selectCompareGradesCount);
+  const { toggleCompareGrade, clearCompareGrades, setBudget } = useAppStore();
+
+  const budget = selection.budget;
+  const compareList = selection.compareGrades;
+  const faceIdStatus = selection.faceIdStatus;
 
   const currentModel = useMemo(() => {
     if (!selection.modelId) return null;
@@ -95,32 +95,29 @@ export default function ScreenOptions() {
     if (option.grade === 'lcd-replacement') {
       tips.push('LCD屏幕不支持熄屏显示和HDR效果');
     }
+    if (faceIdStatus === 'abnormal' && currentModel?.hasFaceId) {
+      tips.push('⚠️ Face ID 异常，更换屏幕时需注意排线保护，避免进一步损坏');
+    }
     return tips;
   };
 
   const handleSelectCompare = (gradeId: string, selected: boolean) => {
     const grade = gradeId as ScreenGrade;
-    if (selected) {
-      if (compareList.length < 3) {
-        setCompareList([...compareList, grade]);
-      }
-    } else {
-      setCompareList(compareList.filter((g) => g !== grade));
-    }
+    toggleCompareGrade(grade);
   };
 
   const handleGoToCompare = () => {
     if (compareList.length >= 2) {
-      const compareParams = new URLSearchParams();
-      compareList.forEach((grade, index) => {
-        compareParams.append(`grade${index + 1}`, grade);
-      });
-      navigate(`/compare?${compareParams.toString()}`);
+      navigate('/compare');
     }
   };
 
   const handleBack = () => {
     navigate('/model-select');
+  };
+
+  const handleBudgetChange = (value: number) => {
+    setBudget(value);
   };
 
   if (!currentModel) {
@@ -196,16 +193,20 @@ export default function ScreenOptions() {
             <div className="h-10 w-px bg-primary-200 hidden md:block" />
 
             <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 rounded-xl bg-warning/10 flex items-center justify-center">
-                <AlertTriangle size={24} className="text-warning" />
+              <div className={cn(
+                "w-12 h-12 rounded-xl flex items-center justify-center",
+                faceIdStatus === 'abnormal' ? 'bg-warning/10' : 'bg-warning/10'
+              )}>
+                <AlertTriangle size={24} className={faceIdStatus === 'abnormal' ? 'text-warning' : 'text-primary-600'} />
               </div>
               <div>
-                <p className="text-xs text-primary-500">Face ID</p>
+                <p className="text-xs text-primary-500">Face ID 状态</p>
                 <p className={cn(
                   'font-bold',
-                  currentModel.hasFaceId ? 'text-success' : 'text-primary-500'
+                  faceIdStatus === 'normal' ? 'text-success' : 
+                  faceIdStatus === 'abnormal' ? 'text-warning' : 'text-primary-600'
                 )}>
-                  {currentModel.hasFaceId ? '支持' : '不支持'}
+                  {faceIdStatus === 'normal' ? '正常' : faceIdStatus === 'abnormal' ? '异常' : '未设置'}
                 </p>
               </div>
             </div>
@@ -219,7 +220,7 @@ export default function ScreenOptions() {
                   <span className="text-xs font-medium text-primary-700">预算上限</span>
                 </div>
                 <span className="text-sm font-bold font-mono text-success">
-                  ¥{localBudget.toLocaleString()}
+                  ¥{budget.toLocaleString()}
                 </span>
               </div>
               <input
@@ -227,8 +228,8 @@ export default function ScreenOptions() {
                 min="0"
                 max="3000"
                 step="50"
-                value={localBudget}
-                onChange={(e) => setLocalBudget(Number(e.target.value))}
+                value={budget}
+                onChange={(e) => handleBudgetChange(Number(e.target.value))}
                 className="w-full h-2 bg-primary-200 rounded-lg appearance-none cursor-pointer accent-success"
               />
             </div>
@@ -244,10 +245,20 @@ export default function ScreenOptions() {
           </div>
         )}
 
+        {compareCount >= 3 && (
+          <div className="bg-primary-100 border border-primary-200 rounded-lg p-3 flex items-center space-x-2">
+            <Check size={16} className="text-primary-600 flex-shrink-0" />
+            <span className="text-sm text-primary-700">
+              已选择 3 个方案，可前往对比页查看，或取消现有选择后更换方案
+            </span>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {screenOptions.map((option) => {
-            const isOverBudget = option.price.retail > localBudget;
+            const isOverBudget = option.price.retail > budget;
             const isSelected = compareList.includes(option.grade);
+            const isDisabled = !isSelected && compareCount >= 3;
             const params = buildScreenParams(option);
             const riskTips = buildRiskTips(option);
 
@@ -264,6 +275,9 @@ export default function ScreenOptions() {
                     超出预算
                   </div>
                 )}
+                {isDisabled && (
+                  <div className="absolute inset-0 z-20 bg-white/50 rounded-xl cursor-not-allowed" />
+                )}
                 <ScreenCard
                   id={option.grade}
                   grade={option.gradeName}
@@ -272,6 +286,7 @@ export default function ScreenOptions() {
                   riskTips={riskTips}
                   price={option.price.retail}
                   isSelected={isSelected}
+                  isDisabled={isDisabled}
                   onSelect={handleSelectCompare}
                 />
               </div>
@@ -288,7 +303,7 @@ export default function ScreenOptions() {
           </div>
           <div className="flex space-x-3">
             <button
-              onClick={() => setCompareList([])}
+              onClick={() => clearCompareGrades()}
               className="px-4 py-2 bg-primary-100 text-primary-600 rounded-lg hover:bg-primary-200 transition-colors text-sm font-medium"
             >
               清空选择

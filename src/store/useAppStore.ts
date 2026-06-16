@@ -8,6 +8,11 @@ const defaultSelection: SelectionParams = {
   screenGrade: null,
   includeCompatibility: true,
   includeInventory: true,
+  region: 'all',
+  faceIdStatus: 'all',
+  originalScreenType: 'all',
+  budget: 3000,
+  compareGrades: [],
 };
 
 const defaultTestChecklist: TestChecklistItem[] = [
@@ -33,39 +38,113 @@ const defaultTestChecklist: TestChecklistItem[] = [
   { id: 'buttons-4', name: 'Home键/Touch ID正常', category: 'buttons', checked: false, passed: null },
 ];
 
+const persistSelection = (selection: SelectionParams) => {
+  storage.set(storageKeys.SELECTION, selection);
+};
+
 export const useAppStore = create<AppState>((set, get) => ({
   selection: defaultSelection,
   pinnedModelIds: [],
   favoriteModelIds: [],
   compareModelIds: [],
+  favoriteNoteIds: [],
   historyQuotes: [],
   testChecklist: defaultTestChecklist,
 
   setModelId: (modelId: string | null) => {
-    set((state) => ({
-      selection: { ...state.selection, modelId },
-    }));
+    set((state) => {
+      const newSelection = { ...state.selection, modelId };
+      persistSelection(newSelection);
+      return { selection: newSelection };
+    });
   },
 
   setScreenGrade: (grade: ScreenGrade | null) => {
-    set((state) => ({
-      selection: { ...state.selection, screenGrade: grade },
-    }));
+    set((state) => {
+      const newSelection = { ...state.selection, screenGrade: grade };
+      persistSelection(newSelection);
+      return { selection: newSelection };
+    });
   },
 
   setIncludeCompatibility: (value: boolean) => {
-    set((state) => ({
-      selection: { ...state.selection, includeCompatibility: value },
-    }));
+    set((state) => {
+      const newSelection = { ...state.selection, includeCompatibility: value };
+      persistSelection(newSelection);
+      return { selection: newSelection };
+    });
   },
 
   setIncludeInventory: (value: boolean) => {
-    set((state) => ({
-      selection: { ...state.selection, includeInventory: value },
-    }));
+    set((state) => {
+      const newSelection = { ...state.selection, includeInventory: value };
+      persistSelection(newSelection);
+      return { selection: newSelection };
+    });
+  },
+
+  setRegion: (region: 'all' | 'china' | 'global') => {
+    set((state) => {
+      const newSelection = { ...state.selection, region };
+      persistSelection(newSelection);
+      return { selection: newSelection };
+    });
+  },
+
+  setFaceIdStatus: (status: 'all' | 'normal' | 'abnormal') => {
+    set((state) => {
+      const newSelection = { ...state.selection, faceIdStatus: status };
+      persistSelection(newSelection);
+      return { selection: newSelection };
+    });
+  },
+
+  setOriginalScreenType: (type: 'all' | 'oled' | 'lcd') => {
+    set((state) => {
+      const newSelection = { ...state.selection, originalScreenType: type };
+      persistSelection(newSelection);
+      return { selection: newSelection };
+    });
+  },
+
+  setBudget: (budget: number) => {
+    set((state) => {
+      const newSelection = { ...state.selection, budget };
+      persistSelection(newSelection);
+      return { selection: newSelection };
+    });
+  },
+
+  toggleCompareGrade: (grade: ScreenGrade) => {
+    set((state) => {
+      const isComparing = state.selection.compareGrades.includes(grade);
+      let newCompareGrades: ScreenGrade[];
+      
+      if (isComparing) {
+        newCompareGrades = state.selection.compareGrades.filter((g) => g !== grade);
+      } else {
+        if (state.selection.compareGrades.length >= 3) {
+          return state;
+        }
+        newCompareGrades = [...state.selection.compareGrades, grade];
+      }
+      
+      const newSelection = { ...state.selection, compareGrades: newCompareGrades };
+      persistSelection(newSelection);
+      return { selection: newSelection };
+    });
+  },
+
+  clearCompareGrades: () => {
+    set((state) => {
+      const newSelection = { ...state.selection, compareGrades: [] };
+      persistSelection(newSelection);
+      return { selection: newSelection };
+    });
   },
 
   resetSelection: () => {
+    persistSelection(defaultSelection);
     set({ selection: defaultSelection });
   },
 
@@ -109,6 +188,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     storage.remove(storageKeys.COMPARE_MODELS);
   },
 
+  toggleFavoriteNote: (noteId: string) => {
+    set((state) => {
+      const isFavorite = state.favoriteNoteIds.includes(noteId);
+      const newFavorites = isFavorite
+        ? state.favoriteNoteIds.filter((id) => id !== noteId)
+        : [...state.favoriteNoteIds, noteId];
+      storage.set(storageKeys.FAVORITE_NOTES, newFavorites);
+      return { favoriteNoteIds: newFavorites };
+    });
+  },
+
   addHistoryQuote: (quote: Omit<HistoryQuote, 'id' | 'createdAt'>) => {
     set((state) => {
       const newQuote: HistoryQuote = {
@@ -148,15 +238,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   initializeFromStorage: () => {
+    const selection = storage.get<SelectionParams>(storageKeys.SELECTION, defaultSelection);
     const pinned = storage.get<string[]>(storageKeys.PINNED_MODELS, []);
     const favorites = storage.get<string[]>(storageKeys.FAVORITE_MODELS, []);
     const compare = storage.get<string[]>(storageKeys.COMPARE_MODELS, []);
+    const favoriteNotes = storage.get<string[]>(storageKeys.FAVORITE_NOTES, []);
     const history = storage.get<HistoryQuote[]>(storageKeys.HISTORY_QUOTES, []);
 
     set({
+      selection: { ...defaultSelection, ...selection, compareGrades: selection.compareGrades || [] },
       pinnedModelIds: pinned,
       favoriteModelIds: favorites,
       compareModelIds: compare,
+      favoriteNoteIds: favoriteNotes,
       historyQuotes: history,
     });
   },
@@ -166,6 +260,7 @@ export const selectSelection = (state: AppState) => state.selection;
 export const selectPinnedModelIds = (state: AppState) => state.pinnedModelIds;
 export const selectFavoriteModelIds = (state: AppState) => state.favoriteModelIds;
 export const selectCompareModelIds = (state: AppState) => state.compareModelIds;
+export const selectFavoriteNoteIds = (state: AppState) => state.favoriteNoteIds;
 export const selectHistoryQuotes = (state: AppState) => state.historyQuotes;
 export const selectTestChecklist = (state: AppState) => state.testChecklist;
 
@@ -175,6 +270,14 @@ export const selectIsModelFavorite = (modelId: string) => (state: AppState) =>
   state.favoriteModelIds.includes(modelId);
 export const selectIsModelComparing = (modelId: string) => (state: AppState) =>
   state.compareModelIds.includes(modelId);
+export const selectIsNoteFavorite = (noteId: string) => (state: AppState) =>
+  state.favoriteNoteIds.includes(noteId);
+export const selectCompareGrades = (state: AppState) =>
+  state.selection.compareGrades;
+export const selectIsGradeComparing = (grade: ScreenGrade) => (state: AppState) =>
+  state.selection.compareGrades.includes(grade);
+export const selectCompareGradesCount = (state: AppState) =>
+  state.selection.compareGrades.length;
 
 export const selectCompletedTests = (state: AppState) =>
   state.testChecklist.filter((item) => item.checked);

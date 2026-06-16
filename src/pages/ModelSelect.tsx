@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Globe, Shield, Monitor, Wallet, Star } from 'lucide-react';
 import Layout from '@/components/Layout';
@@ -15,28 +15,21 @@ type ScreenTypeFilter = 'all' | 'oled' | 'lcd';
 export default function ModelSelect() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
-  const [region, setRegion] = useState<Region>('all');
-  const [faceIdStatus, setFaceIdStatus] = useState<FaceIdStatus>('all');
-  const [screenType, setScreenType] = useState<ScreenTypeFilter>('all');
-  const [budget, setBudget] = useState(3000);
 
-  const { setModelId, togglePinnedModel } = useAppStore();
-  const pinnedModelIds = useAppStore(selectPinnedModelIds);
   const selection = useAppStore(selectSelection);
+  const pinnedModelIds = useAppStore(selectPinnedModelIds);
+  const { setModelId, togglePinnedModel, setRegion, setFaceIdStatus, setOriginalScreenType, setBudget } = useAppStore();
+
+  const region = selection.region as Region;
+  const faceIdStatus = selection.faceIdStatus as FaceIdStatus;
+  const screenType = selection.originalScreenType as ScreenTypeFilter;
+  const budget = selection.budget;
 
   const filteredModels = useMemo(() => {
     let models = [...iphoneModels];
 
     if (region !== 'all') {
       models = models.filter((m) => m.region === region);
-    }
-
-    if (faceIdStatus !== 'all') {
-      if (faceIdStatus === 'normal') {
-        models = models.filter((m) => m.hasFaceId);
-      } else {
-        models = models.filter((m) => !m.hasFaceId);
-      }
     }
 
     if (screenType !== 'all') {
@@ -71,7 +64,7 @@ export default function ModelSelect() {
     unpinned.sort((a, b) => b.releaseYear - a.releaseYear);
 
     return [...pinned, ...unpinned];
-  }, [region, faceIdStatus, screenType, searchQuery, budget, pinnedModelIds]);
+  }, [region, screenType, searchQuery, budget, pinnedModelIds]);
 
   const handleSelectModel = (modelId: string) => {
     setModelId(modelId);
@@ -80,6 +73,22 @@ export default function ModelSelect() {
 
   const handlePinModel = (modelId: string) => {
     togglePinnedModel(modelId);
+  };
+
+  const handleRegionChange = (r: Region) => {
+    setRegion(r);
+  };
+
+  const handleFaceIdChange = (s: FaceIdStatus) => {
+    setFaceIdStatus(s);
+  };
+
+  const handleScreenTypeChange = (t: ScreenTypeFilter) => {
+    setOriginalScreenType(t);
+  };
+
+  const handleBudgetChange = (value: number) => {
+    setBudget(value);
   };
 
   return (
@@ -111,7 +120,7 @@ export default function ModelSelect() {
                 {(['all', 'china', 'global'] as Region[]).map((r) => (
                   <button
                     key={r}
-                    onClick={() => setRegion(r)}
+                    onClick={() => handleRegionChange(r)}
                     className={cn(
                       'flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all',
                       region === r
@@ -129,12 +138,13 @@ export default function ModelSelect() {
               <div className="flex items-center space-x-2">
                 <Shield size={16} className="text-primary-500" />
                 <label className="text-sm font-medium text-primary-700">Face ID 状态</label>
+                <span className="text-xs text-primary-400">(客户手机当前状态)</span>
               </div>
               <div className="flex space-x-2">
                 {(['all', 'normal', 'abnormal'] as FaceIdStatus[]).map((s) => (
                   <button
                     key={s}
-                    onClick={() => setFaceIdStatus(s)}
+                    onClick={() => handleFaceIdChange(s)}
                     className={cn(
                       'flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all',
                       faceIdStatus === s
@@ -157,7 +167,7 @@ export default function ModelSelect() {
                 {(['all', 'oled', 'lcd'] as ScreenTypeFilter[]).map((t) => (
                   <button
                     key={t}
-                    onClick={() => setScreenType(t)}
+                    onClick={() => handleScreenTypeChange(t)}
                     className={cn(
                       'flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all',
                       screenType === t
@@ -187,7 +197,7 @@ export default function ModelSelect() {
                 max="3000"
                 step="50"
                 value={budget}
-                onChange={(e) => setBudget(Number(e.target.value))}
+                onChange={(e) => handleBudgetChange(Number(e.target.value))}
                 className="w-full h-2 bg-primary-200 rounded-lg appearance-none cursor-pointer accent-success"
               />
               <div className="flex justify-between text-xs text-primary-400">
@@ -211,6 +221,21 @@ export default function ModelSelect() {
             </div>
           </div>
         </div>
+
+        {faceIdStatus !== 'all' && (
+          <div className={cn(
+            'p-3 rounded-lg flex items-center space-x-2',
+            faceIdStatus === 'normal' ? 'bg-success/10 border border-success/30' : 'bg-warning/10 border border-warning/30'
+          )}>
+            <Shield size={16} className={faceIdStatus === 'normal' ? 'text-success' : 'text-warning'} />
+            <span className={cn(
+              'text-sm',
+              faceIdStatus === 'normal' ? 'text-success-700' : 'text-warning-700'
+            )}>
+              当前设置：客户手机 Face ID {faceIdStatus === 'normal' ? '正常' : '异常'}，后续方案将显示相关注意事项
+            </span>
+          </div>
+        )}
 
         <div className="flex items-center justify-between">
           <span className="text-sm text-primary-500">

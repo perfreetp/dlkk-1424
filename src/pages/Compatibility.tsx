@@ -21,7 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import Layout from '@/components/Layout';
-import { useAppStore, selectSelection, selectTestChecklist, selectFavoriteModelIds } from '@/store/useAppStore';
+import { useAppStore, selectSelection, selectTestChecklist, selectFavoriteNoteIds } from '@/store/useAppStore';
 import { getModelById } from '@/data/models';
 import { getCompatibilityByModelId } from '@/data/compatibility';
 import type { CompatibilityCategory, CompatibilityNote, TestChecklistItem } from '@/types';
@@ -101,7 +101,6 @@ const operationSteps: Record<string, string[]> = {
 interface NoteDetail {
   id: string;
   expanded: boolean;
-  favorite: boolean;
 }
 
 export default function Compatibility() {
@@ -112,7 +111,8 @@ export default function Compatibility() {
 
   const selection = useAppStore(selectSelection);
   const testChecklist = useAppStore(selectTestChecklist);
-  const { updateTestChecklist, resetTestChecklist, toggleFavoriteModel } = useAppStore();
+  const favoriteNoteIds = useAppStore(selectFavoriteNoteIds);
+  const { updateTestChecklist, resetTestChecklist, toggleFavoriteModel, toggleFavoriteNote } = useAppStore();
 
   const currentModel = useMemo(() => {
     if (!selection.modelId) return null;
@@ -132,11 +132,11 @@ export default function Compatibility() {
     }
 
     if (showFavoritesOnly) {
-      filtered = filtered.filter((n) => noteDetails[n.modelId + '-' + n.category]?.favorite);
+      filtered = filtered.filter((n) => favoriteNoteIds.includes(n.modelId + '-' + n.category));
     }
 
     return filtered;
-  }, [notes, categoryFilter, showFavoritesOnly, noteDetails]);
+  }, [notes, categoryFilter, showFavoritesOnly, favoriteNoteIds]);
 
   const toggleExpand = (noteId: string) => {
     setNoteDetails((prev) => ({
@@ -149,13 +149,7 @@ export default function Compatibility() {
   };
 
   const toggleFavorite = (noteId: string) => {
-    setNoteDetails((prev) => ({
-      ...prev,
-      [noteId]: {
-        ...prev[noteId],
-        favorite: !prev[noteId]?.favorite,
-      },
-    }));
+    toggleFavoriteNote(noteId);
   };
 
   const handleTestItemCheck = (id: string) => {
@@ -279,7 +273,8 @@ export default function Compatibility() {
         <div className="space-y-3">
           {filteredNotes.map((note) => {
             const noteId = getNoteId(note);
-            const detail = noteDetails[noteId] || { expanded: false, favorite: false };
+            const detail = noteDetails[noteId] || { expanded: false };
+            const isFavorite = favoriteNoteIds.includes(noteId);
             const severity = severityConfig[note.severity];
             const steps = operationSteps[note.category] || [];
 
@@ -338,12 +333,12 @@ export default function Compatibility() {
                         }}
                         className={cn(
                           'p-2 rounded-lg transition-all',
-                          detail.favorite
+                          isFavorite
                             ? 'text-yellow-500 bg-yellow-100'
                             : 'text-primary-300 hover:text-yellow-500 hover:bg-yellow-50'
                         )}
                       >
-                        <Star size={18} fill={detail.favorite ? 'currentColor' : 'none'} />
+                        <Star size={18} fill={isFavorite ? 'currentColor' : 'none'} />
                       </button>
                       <button className="p-2 rounded-lg text-primary-400 hover:text-primary-600 hover:bg-primary-100 transition-all">
                         {detail.expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
