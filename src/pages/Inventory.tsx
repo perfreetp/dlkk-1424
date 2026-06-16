@@ -34,9 +34,8 @@ import {
   Shield,
 } from 'lucide-react';
 import Layout from '@/components/Layout';
-import { useAppStore, selectHistoryQuotes, selectSelection, selectWorkOrders, selectInventoryReservations } from '@/store/useAppStore';
+import { useAppStore, selectHistoryQuotes, selectSelection, selectWorkOrders, selectInventoryReservations, selectInventoryItems } from '@/store/useAppStore';
 import { iphoneModels } from '@/data/models';
-import { inventoryItems, getInventoryByModelAndGrade } from '@/data/inventory';
 import { getScreenOption } from '@/data/screenOptions';
 import type { InventoryItem, ScreenGrade, HistoryQuote, WorkOrder, WorkOrderStatus } from '@/types';
 import { cn } from '@/lib/utils';
@@ -113,10 +112,13 @@ export default function Inventory() {
   const [workOrderStatusFilter, setWorkOrderStatusFilter] = useState<WorkOrderStatus | 'all'>('all');
   const [formData, setFormData] = useState<QuoteFormData>(defaultFormData);
   const [quoteSaved, setQuoteSaved] = useState(false);
+  const [showAlternativeModal, setShowAlternativeModal] = useState(false);
+  const [pendingQuoteForWorkOrder, setPendingQuoteForWorkOrder] = useState<HistoryQuote | null>(null);
 
   const historyQuotes = useAppStore(selectHistoryQuotes);
   const workOrders = useAppStore(selectWorkOrders);
   const inventoryReservations = useAppStore(selectInventoryReservations);
+  const inventoryItems = useAppStore(selectInventoryItems);
   const selection = useAppStore(selectSelection);
   const {
     addHistoryQuote,
@@ -128,6 +130,7 @@ export default function Inventory() {
     releaseInventory,
     deductInventory,
     getAvailableQuantity,
+    getInventoryByModelAndGrade,
   } = useAppStore();
 
   const suppliers = useMemo(() => {
@@ -311,6 +314,7 @@ export default function Inventory() {
       screenPrice: selectedScreenPrice,
       laborFee: formData.laborFee,
       totalPrice: totalQuotePrice,
+      budget: selection.budget,
       customerName: formData.customerName || undefined,
       customerPhone: formData.customerPhone || undefined,
       faultDescription: formData.faultDescription || undefined,
@@ -341,12 +345,60 @@ export default function Inventory() {
   };
 
   const handleConvertToWorkOrder = (quote: HistoryQuote) => {
+    const inventoryItem = getInventoryByModelAndGrade(quote.modelId, quote.screenGrade);
+    const available = inventoryItem ? getAvailableQuantity(quote.modelId, quote.screenGrade) : 0;
+
+    if (available <= 0) {
+      setPendingQuoteForWorkOrder(quote);
+      setShowAlternativeModal(true);
+      return;
+    }
+
     const workOrder = convertQuoteToWorkOrder(quote.id);
+    if (workOrder && inventoryItem) {
+      reserveInventory(workOrder.id, inventoryItem.id, quote.modelId, quote.screenGrade, 1);
+      setShowQuoteDetailModal(false);
+      setSelectedWorkOrder(workOrder);
+      setShowWorkOrderDetailModal(true);
+    }
+  };
+
+  const handleSelectAlternativeGrade = (newGrade: ScreenGrade) => {
+    if (!pendingQuoteForWorkOrder) return;
+    
+    const inventoryItem = getInventoryByModelAndGrade(pendingQuoteForWorkOrder.modelId, newGrade);
+    if (!inventoryItem) return;
+
+    const updatedQuote: HistoryQuote = {
+      ...pendingQuoteForWorkOrder,
+      screenGrade: newGrade,
+      gradeName: gradeNames[newGrade],
+      screenPrice: inventoryItem.retailPrice,
+      totalPrice: inventoryItem.retailPrice + pendingQuoteForWorkOrder.laborFee,
+    };
+
+    const workOrder = addWorkOrder({
+      quoteId: pendingQuoteForWorkOrder.id,
+      modelId: updatedQuote.modelId,
+      modelName: updatedQuote.modelName,
+      screenGrade: updatedQuote.screenGrade,
+      gradeName: updatedQuote.gradeName,
+      screenPrice: updatedQuote.screenPrice,
+      laborFee: updatedQuote.laborFee,
+      totalPrice: updatedQuote.totalPrice,
+      budget: updatedQuote.budget,
+      customerName: updatedQuote.customerName,
+      customerPhone: updatedQuote.customerPhone,
+      faultDescription: updatedQuote.faultDescription,
+      faceIdStatus: updatedQuote.faceIdStatus,
+      status: 'quoted',
+      notes: `${updatedQuote.notes || ''}。由原方案${gradeNames[pendingQuoteForWorkOrder.screenGrade]}改选${gradeNames[newGrade]}（库存不足）`.replace(/^。/, ''),
+    });
+
     if (workOrder) {
-      const inventoryItem = getInventoryByModelAndGrade(quote.modelId, quote.screenGrade);
-      if (inventoryItem) {
-        reserveInventory(workOrder.id, inventoryItem.id, quote.modelId, quote.screenGrade, 1);
-      }
+      reserveInventory(workOrder.id, inventoryItem.id, workOrder.modelId, workOrder.screenGrade, 1);
+      setShowAlternativeModal(false);
+      setPendingQuoteForWorkOrder(null);
       setShowQuoteDetailModal(false);
       setSelectedWorkOrder(workOrder);
       setShowWorkOrderDetailModal(true);
@@ -665,11 +717,21 @@ export default function Inventory() {
                   const margin = getProfitMargin(item);
                   const profit = item.retailPrice - item.purchasePrice;
                   const isExpanded = expandedRow === item.id;
-                  const isLowStock = item.quantity <= item.minStock;
+                  const availableQty = getAvailableQuantity(item.modelId, item.screenGrade);
+                  const reservedQty = item.quantity - availableQty;
+                  const isLowStock = availableQty <= item.minStock;
                   const alternatives = isLowStock
                     ? inventoryItems
-                        .filter((i) => i.modelId === item.modelId && i.id !== item.id && i.quantity > i.minStock)
-                        .sort((a, b) => b.quantity - a.quantity)
+                        .filter((i) => {
+                          if (i.modelId !== item.modelId || i.id === item.id) return false;
+                          const iAvailable = getAvailableQuantity(i.modelId, i.screenGrade);
+                          return iAvailable > i.minStock;
+                        })
+                        .sort((a, b) => {
+                          const aAvail = getAvailableQuantity(a.modelId, a.screenGrade);
+                          const bAvail = getAvailableQuantity(b.modelId, b.screenGrade);
+                          return bAvail - aAvail;
+                        })
                     : [];
 
                   return (
@@ -707,15 +769,28 @@ export default function Inventory() {
                           {getModelName(item.modelId)}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <span className={cn(
-                            'font-mono font-semibold text-sm',
-                            isLowStock ? 'text-red-500' : 'text-primary-700'
-                          )}>
-                            {item.quantity.toLocaleString()}
-                          </span>
-                          {isLowStock && (
-                            <span className="text-[10px] text-red-500 block">库存不足</span>
-                          )}
+                          <div className="flex flex-col items-end space-y-0.5">
+                            <span className={cn(
+                              'font-mono font-semibold text-sm',
+                              isLowStock ? 'text-red-500' : 'text-primary-700'
+                            )}>
+                              {availableQty.toLocaleString()}
+                              <span className="text-[10px] text-primary-400 font-normal ml-1">可用</span>
+                            </span>
+                            {reservedQty > 0 && (
+                              <span className="text-[10px] text-warning-600 font-mono">
+                                (总{item.quantity.toLocaleString()} / 预占{reservedQty.toLocaleString()}
+                              </span>
+                            )}
+                            {reservedQty === 0 && item.quantity > 0 && (
+                              <span className="text-[10px] text-primary-400 font-mono">
+                                总库存: {item.quantity.toLocaleString()}
+                              </span>
+                            )}
+                            {isLowStock && (
+                              <span className="text-[10px] text-red-500 block">库存不足</span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-right font-mono text-sm text-primary-700">
                           ¥{item.purchasePrice.toLocaleString()}
@@ -766,35 +841,42 @@ export default function Inventory() {
                                         库存不足警告
                                       </h4>
                                       <p className="text-xs text-red-600 mt-1">
-                                        当前库存仅 {item.quantity} 件，低于安全库存 {item.minStock} 件
+                                        当前可用库存仅 {availableQty} 件（总库存 {item.quantity} 件，已预占 {reservedQty} 件），低于安全库存 {item.minStock} 件
                                       </p>
                                       <div className="mt-3">
                                         <p className="text-xs font-medium text-primary-700 mb-2">
                                           推荐替代方案：
                                         </p>
                                         <div className="flex flex-wrap gap-2">
-                                          {alternatives.map((alt) => (
-                                            <div
-                                              key={alt.id}
-                                              className="flex items-center space-x-2 px-3 py-2 bg-white rounded-lg border border-primary-200"
-                                            >
-                                              <span className={cn(
-                                                'text-xs font-bold px-2 py-0.5 rounded',
-                                                gradeColors[alt.screenGrade]
-                                              )}>
-                                                {gradeNames[alt.screenGrade]}
-                                              </span>
-                                              <span className="text-xs text-primary-600">
-                                                库存: <span className="font-mono text-green-600">{alt.quantity}</span>
-                                              </span>
-                                              <span className="text-xs text-primary-700 font-mono">
-                                                ¥{alt.retailPrice}
-                                              </span>
-                                              <span className="text-[10px] text-primary-400">
-                                                {alt.supplier}
-                                              </span>
-                                            </div>
-                                          ))}
+                                          {alternatives.map((alt) => {
+                                            const altAvailable = getAvailableQuantity(alt.modelId, alt.screenGrade);
+                                            const altReserved = alt.quantity - altAvailable;
+                                            return (
+                                              <div
+                                                key={alt.id}
+                                                className="flex items-center space-x-2 px-3 py-2 bg-white rounded-lg border border-primary-200"
+                                              >
+                                                <span className={cn(
+                                                  'text-xs font-bold px-2 py-0.5 rounded',
+                                                  gradeColors[alt.screenGrade]
+                                                )}>
+                                                  {gradeNames[alt.screenGrade]}
+                                                </span>
+                                                <span className="text-xs text-primary-600">
+                                                  可用: <span className="font-mono text-green-600">{altAvailable}</span>
+                                                  {altReserved > 0 && (
+                                                    <span className="text-warning-500 ml-1">(预占{altReserved})</span>
+                                                  )}
+                                                </span>
+                                                <span className="text-xs text-primary-700 font-mono">
+                                                  ¥{alt.retailPrice}
+                                                </span>
+                                                <span className="text-[10px] text-primary-400">
+                                                  {alt.supplier}
+                                                </span>
+                                              </div>
+                                            );
+                                          })}
                                         </div>
                                       </div>
                                     </div>
@@ -1431,14 +1513,16 @@ export default function Inventory() {
                   </div>
                 </div>
 
-                {selectedQuote.customerName && (
+                {(selectedQuote.customerName || selectedQuote.customerPhone) && (
                   <div className="bg-white rounded-lg p-4 border border-primary-200">
                     <h4 className="text-sm font-semibold text-primary-700 mb-3">客户信息</h4>
                     <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-primary-500">客户姓名</span>
-                        <p className="font-medium text-primary-800 mt-0.5">{selectedQuote.customerName}</p>
-                      </div>
+                      {selectedQuote.customerName && (
+                        <div>
+                          <span className="text-primary-500">客户姓名</span>
+                          <p className="font-medium text-primary-800 mt-0.5">{selectedQuote.customerName}</p>
+                        </div>
+                      )}
                       {selectedQuote.customerPhone && (
                         <div>
                           <span className="text-primary-500">联系电话</span>
@@ -1488,6 +1572,22 @@ export default function Inventory() {
                       <span className="text-primary-600">人工费</span>
                       <span className="font-mono text-primary-800">¥{selectedQuote.laborFee?.toLocaleString() || '0'}</span>
                     </div>
+                    {selectedQuote.budget > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-primary-600">客户预算</span>
+                        <span className={cn(
+                          'font-mono',
+                          selectedQuote.totalPrice > selectedQuote.budget ? 'text-red-500' : 'text-success'
+                        )}>
+                          ¥{selectedQuote.budget.toLocaleString()}
+                          {selectedQuote.totalPrice > selectedQuote.budget && (
+                            <span className="ml-2 text-xs">
+                              (超预算 ¥{(selectedQuote.totalPrice - selectedQuote.budget).toLocaleString()})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
                     <div className="pt-2 border-t border-primary-200 flex justify-between">
                       <span className="font-semibold text-primary-800">合计</span>
                       <span className="text-2xl font-bold font-mono text-success">
@@ -1515,6 +1615,146 @@ export default function Inventory() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAlternativeModal && pendingQuoteForWorkOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden">
+            <div className="px-6 py-4 border-b border-primary-200 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-warning/10 rounded-lg">
+                  <AlertCircle size={20} className="text-warning" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-primary-800">库存不足，请选择替代等级</h3>
+                  <p className="text-xs text-primary-500">
+                    {pendingQuoteForWorkOrder.modelName} {pendingQuoteForWorkOrder.gradeName} 无可用库存
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAlternativeModal(false);
+                  setPendingQuoteForWorkOrder(null);
+                }}
+                className="p-2 rounded-lg hover:bg-primary-100 transition-colors"
+              >
+                <X size={18} className="text-primary-500" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[70vh]">
+              <div className="mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                <p className="text-xs text-yellow-700">
+                  <span className="font-semibold">原报价方案：</span>
+                  {pendingQuoteForWorkOrder.gradeName}
+                  <span className="mx-2">·</span>
+                  屏幕 ¥{pendingQuoteForWorkOrder.screenPrice?.toLocaleString() || '0'}
+                  <span className="mx-2">+</span>
+                  人工 ¥{pendingQuoteForWorkOrder.laborFee?.toLocaleString() || '0'}
+                  <span className="mx-2">=</span>
+                  <span className="font-bold">合计 ¥{pendingQuoteForWorkOrder.totalPrice.toLocaleString()}</span>
+                </p>
+              </div>
+
+              <h4 className="text-sm font-semibold text-primary-700 mb-3">可选择的替代方案：</h4>
+              <div className="space-y-3">
+                {inventoryItems
+                  .filter((item) => {
+                    if (item.modelId !== pendingQuoteForWorkOrder.modelId) return false;
+                    if (item.screenGrade === pendingQuoteForWorkOrder.screenGrade) return false;
+                    const available = getAvailableQuantity(item.modelId, item.screenGrade);
+                    return available > 0;
+                  })
+                  .sort((a, b) => {
+                    const aAvail = getAvailableQuantity(a.modelId, a.screenGrade);
+                    const bAvail = getAvailableQuantity(b.modelId, b.screenGrade);
+                    return bAvail - aAvail;
+                  })
+                  .map((item) => {
+                    const available = getAvailableQuantity(item.modelId, item.screenGrade);
+                    const newTotal = item.retailPrice + (pendingQuoteForWorkOrder.laborFee || 0);
+                    const priceDiff = newTotal - pendingQuoteForWorkOrder.totalPrice;
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-4 border border-primary-200 rounded-lg hover:border-success hover:bg-success/5 transition-all cursor-pointer"
+                        onClick={() => handleSelectAlternativeGrade(item.screenGrade)}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <span className={cn(
+                                'text-xs font-bold px-2.5 py-1 rounded border',
+                                gradeColors[item.screenGrade]
+                              )}>
+                                {gradeNames[item.screenGrade]}
+                              </span>
+                              <span className="text-xs font-mono text-green-600">
+                                可用库存: {available}
+                              </span>
+                            </div>
+                            <div className="text-xs text-primary-500 space-y-0.5">
+                              <p>供应商: <span className="text-primary-700">{item.supplier}</span></p>
+                              <p>批次号: <span className="font-mono text-primary-700">{item.batchNumber}</span></p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-lg font-bold font-mono text-success">
+                              ¥{newTotal.toLocaleString()}
+                            </p>
+                            {priceDiff !== 0 && (
+                              <p className={cn(
+                                'text-xs font-semibold',
+                                priceDiff > 0 ? 'text-red-500' : 'text-green-600'
+                              )}>
+                                {priceDiff > 0 ? '+' : ''}¥{priceDiff.toLocaleString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-3 pt-3 border-t border-primary-100 flex items-center justify-between">
+                          <div className="text-xs text-primary-500">
+                            屏幕 ¥{item.retailPrice.toLocaleString()}
+                            <span className="mx-1">+</span>
+                            人工 ¥{pendingQuoteForWorkOrder.laborFee?.toLocaleString() || '0'}
+                          </div>
+                          <span className="text-xs text-success font-medium flex items-center space-x-1">
+                            <span>选择此方案</span>
+                            <ArrowRight size={12} />
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+
+              {inventoryItems.filter((item) => {
+                if (item.modelId !== pendingQuoteForWorkOrder.modelId) return false;
+                if (item.screenGrade === pendingQuoteForWorkOrder.screenGrade) return false;
+                const available = getAvailableQuantity(item.modelId, item.screenGrade);
+                return available > 0;
+              }).length === 0 && (
+                <div className="text-center py-8 text-primary-400">
+                  <Package size={32} className="mx-auto mb-2" />
+                  <p className="text-sm">暂无其他可用库存等级</p>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-primary-200 bg-primary-50 flex justify-end space-x-3">
+              <button
+                onClick={() => {
+                  setShowAlternativeModal(false);
+                  setPendingQuoteForWorkOrder(null);
+                }}
+                className="px-4 py-2 text-sm text-primary-600 bg-white border border-primary-200 rounded-lg hover:bg-primary-50 transition-colors"
+              >
+                取消
+              </button>
             </div>
           </div>
         </div>
@@ -1586,14 +1826,16 @@ export default function Inventory() {
                   </div>
                 </div>
 
-                {selectedWorkOrder.customerName && (
+                {(selectedWorkOrder.customerName || selectedWorkOrder.customerPhone) && (
                   <div className="bg-white rounded-lg p-4 border border-primary-200">
                     <h4 className="text-sm font-semibold text-primary-700 mb-3">客户信息</h4>
                     <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-primary-500">客户姓名</span>
-                        <p className="font-medium text-primary-800 mt-0.5">{selectedWorkOrder.customerName}</p>
-                      </div>
+                      {selectedWorkOrder.customerName && (
+                        <div>
+                          <span className="text-primary-500">客户姓名</span>
+                          <p className="font-medium text-primary-800 mt-0.5">{selectedWorkOrder.customerName}</p>
+                        </div>
+                      )}
                       {selectedWorkOrder.customerPhone && (
                         <div>
                           <span className="text-primary-500">联系电话</span>

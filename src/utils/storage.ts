@@ -68,5 +68,6 @@ export const storageKeys = {
   HISTORY_QUOTES: 'history-quotes',
   WORK_ORDERS: 'work-orders',
   INVENTORY_RESERVATIONS: 'inventory-reservations',
+  INVENTORY_ITEMS: 'inventory-items',
   THEME: 'theme',
 } as const;

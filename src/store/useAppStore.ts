@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import type { AppState, SelectionParams, HistoryQuote, TestChecklistItem, ScreenGrade, WorkOrder, WorkOrderStatus, InventoryReservation } from '../types';
+import type { AppState, SelectionParams, HistoryQuote, TestChecklistItem, ScreenGrade, WorkOrder, WorkOrderStatus, InventoryReservation, InventoryItem } from '../types';
 import { storage, storageKeys } from '../utils/storage';
 import { generateId } from '../utils/formatter';
-import { getInventoryByModelAndGrade } from '../data/inventory';
+import { inventoryItems as defaultInventoryItems } from '../data/inventory';
 
 const defaultSelection: SelectionParams = {
   modelId: null,
@@ -52,7 +52,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   historyQuotes: [],
   workOrders: [],
   inventoryReservations: [],
+  inventoryItems: defaultInventoryItems,
   testChecklist: defaultTestChecklist,
+
+  getInventoryByModelAndGrade: (modelId: string, screenGrade: ScreenGrade): InventoryItem | undefined => {
+    return get().inventoryItems.find((item) => item.modelId === modelId && item.screenGrade === screenGrade);
+  },
 
   setModelId: (modelId: string | null) => {
     set((state) => {
@@ -228,7 +233,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     storage.remove(storageKeys.HISTORY_QUOTES);
   },
 
-  addWorkOrder: (order: Omit<WorkOrder, 'id' | 'createdAt' | 'updatedAt' | 'statusHistory'>) => {
+  addWorkOrder: (order: Omit<WorkOrder, 'id' | 'createdAt' | 'updatedAt' | 'statusHistory'>): WorkOrder | null => {
+    let createdOrder: WorkOrder | null = null;
     set((state) => {
       const now = new Date().toISOString();
       const newOrder: WorkOrder = {
@@ -238,10 +244,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         updatedAt: now,
         statusHistory: [{ status: order.status, timestamp: now }],
       };
+      createdOrder = newOrder;
       const newOrders = [newOrder, ...state.workOrders].slice(0, 100);
       storage.set(storageKeys.WORK_ORDERS, newOrders);
       return { workOrders: newOrders };
     });
+    return createdOrder;
   },
 
   updateWorkOrderStatus: (id: string, status: WorkOrderStatus, remark?: string) => {
@@ -299,7 +307,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       screenPrice: quote.screenPrice,
       laborFee: quote.laborFee,
       totalPrice: quote.totalPrice,
-      budget: state.selection.budget,
+      budget: quote.budget,
       customerName: quote.customerName,
       customerPhone: quote.customerPhone,
       faultDescription: quote.faultDescription,
@@ -360,19 +368,31 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deductInventory: (reservationId: string) => {
     set((state) => {
+      const reservation = state.inventoryReservations.find((r) => r.id === reservationId);
       const newReservations = state.inventoryReservations.map((r) =>
         r.id === reservationId
           ? { ...r, status: 'deducted' as const, updatedAt: new Date().toISOString() }
           : r
       );
+      
+      let newInventoryItems = state.inventoryItems;
+      if (reservation) {
+        newInventoryItems = state.inventoryItems.map((item) =>
+          item.id === reservation.inventoryId
+            ? { ...item, quantity: Math.max(0, item.quantity - reservation.quantity) }
+            : item
+        );
+        storage.set(storageKeys.INVENTORY_ITEMS, newInventoryItems);
+      }
+      
       storage.set(storageKeys.INVENTORY_RESERVATIONS, newReservations);
-      return { inventoryReservations: newReservations };
+      return { inventoryReservations: newReservations, inventoryItems: newInventoryItems };
     });
   },
 
   getAvailableQuantity: (modelId: string, screenGrade: ScreenGrade): number => {
     const state = get();
-    const inventory = getInventoryByModelAndGrade(modelId, screenGrade);
+    const inventory = state.getInventoryByModelAndGrade(modelId, screenGrade);
     if (!inventory) return 0;
 
     const reservedQuantity = state.inventoryReservations
@@ -403,6 +423,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const history = storage.get<HistoryQuote[]>(storageKeys.HISTORY_QUOTES, []);
     const workOrders = storage.get<WorkOrder[]>(storageKeys.WORK_ORDERS, []);
     const inventoryReservations = storage.get<InventoryReservation[]>(storageKeys.INVENTORY_RESERVATIONS, []);
+    const storedInventoryItems = storage.get<InventoryItem[]>(storageKeys.INVENTORY_ITEMS, []);
+    const inventoryItems = storedInventoryItems.length > 0 ? storedInventoryItems : defaultInventoryItems;
 
     set({
       selection: { ...defaultSelection, ...selection, compareGrades: selection.compareGrades || [] },
@@ -413,6 +435,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       historyQuotes: history,
       workOrders,
       inventoryReservations,
+      inventoryItems,
     });
   },
 }));
@@ -425,6 +448,7 @@ export const selectFavoriteNoteIds = (state: AppState) => state.favoriteNoteIds;
 export const selectHistoryQuotes = (state: AppState) => state.historyQuotes;
 export const selectWorkOrders = (state: AppState) => state.workOrders;
 export const selectInventoryReservations = (state: AppState) => state.inventoryReservations;
+export const selectInventoryItems = (state: AppState) => state.inventoryItems;
 export const selectTestChecklist = (state: AppState) => state.testChecklist;
 
 export const selectIsModelPinned = (modelId: string) => (state: AppState) =>

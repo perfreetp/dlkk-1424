@@ -352,6 +352,7 @@ export default function CompareList() {
       screenPrice: recommended.price.retail,
       laborFee: 0,
       totalPrice: recommended.price.retail,
+      budget: selection.budget,
       faceIdStatus: selection.faceIdStatus === 'all' ? undefined : selection.faceIdStatus,
       notes: `对比方案: ${compareOptions.map((o) => gradeNames[o.grade]).join(', ')}`,
     });
@@ -598,6 +599,7 @@ export default function CompareList() {
                 screenPrice: option.price.retail,
                 laborFee: 0,
                 totalPrice: option.price.retail,
+                budget: selection.budget,
                 faceIdStatus: selection.faceIdStatus === 'all' ? undefined : selection.faceIdStatus,
                 notes: '从对比页面选择',
               });

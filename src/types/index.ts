@@ -96,6 +96,7 @@ export type HistoryQuote = {
   screenPrice: number;
   laborFee: number;
   totalPrice: number;
+  budget: number;
   createdAt: string;
   customerName?: string;
   customerPhone?: string;
@@ -164,6 +165,7 @@ export type AppState = {
   historyQuotes: HistoryQuote[];
   workOrders: WorkOrder[];
   inventoryReservations: InventoryReservation[];
+  inventoryItems: InventoryItem[];
   testChecklist: TestChecklistItem[];
 
   setModelId: (modelId: string | null) => void;
@@ -188,7 +190,7 @@ export type AppState = {
   removeHistoryQuote: (id: string) => void;
   clearHistoryQuotes: () => void;
 
-  addWorkOrder: (order: Omit<WorkOrder, 'id' | 'createdAt' | 'updatedAt' | 'statusHistory'>) => void;
+  addWorkOrder: (order: Omit<WorkOrder, 'id' | 'createdAt' | 'updatedAt' | 'statusHistory'>) => WorkOrder | null;
   updateWorkOrderStatus: (id: string, status: WorkOrderStatus, remark?: string) => void;
   updateWorkOrder: (id: string, updates: Partial<WorkOrder>) => void;
   removeWorkOrder: (id: string) => void;
@@ -198,6 +200,7 @@ export type AppState = {
   releaseInventory: (reservationId: string) => void;
   deductInventory: (reservationId: string) => void;
   getAvailableQuantity: (modelId: string, screenGrade: ScreenGrade) => number;
+  getInventoryByModelAndGrade: (modelId: string, screenGrade: ScreenGrade) => InventoryItem | undefined;
 
   updateTestChecklist: (id: string, updates: Partial<Omit<TestChecklistItem, 'id' | 'category'>>) => void;
   resetTestChecklist: () => void;
