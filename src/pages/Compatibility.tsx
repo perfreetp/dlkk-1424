@@ -19,15 +19,42 @@ import {
   Battery,
   CheckCircle2,
   X,
+  ShieldAlert,
+  ShieldCheck,
+  Monitor,
 } from 'lucide-react';
 import Layout from '@/components/Layout';
 import { useAppStore, selectSelection, selectTestChecklist, selectFavoriteNoteIds } from '@/store/useAppStore';
 import { getModelById } from '@/data/models';
 import { getCompatibilityByModelId } from '@/data/compatibility';
-import type { CompatibilityCategory, CompatibilityNote, TestChecklistItem } from '@/types';
+import type { CompatibilityCategory, CompatibilityNote, TestChecklistItem, ScreenGrade } from '@/types';
 import { cn } from '@/lib/utils';
 
 type CategoryFilter = CompatibilityCategory | 'all';
+
+const gradeNames: Record<ScreenGrade, string> = {
+  'original': '原装屏幕',
+  'refurbished': '后压屏幕',
+  'chinese-oled': '国产OLED',
+  'lcd-replacement': 'LCD替代屏',
+};
+
+const faceIdStatusConfig = {
+  normal: {
+    label: '正常',
+    bg: 'bg-green-50',
+    border: 'border-green-200',
+    text: 'text-green-700',
+    icon: <ShieldCheck size={20} className="text-green-600" />,
+  },
+  abnormal: {
+    label: '异常',
+    bg: 'bg-red-50',
+    border: 'border-red-200',
+    text: 'text-red-700',
+    icon: <ShieldAlert size={20} className="text-red-600" />,
+  },
+};
 
 const categoryConfig: Record<CategoryFilter, { label: string; icon: React.ReactNode }> = {
   'all': { label: '全部', icon: <Info size={16} /> },
@@ -249,6 +276,75 @@ export default function Compatibility() {
             <span>{showFavoritesOnly ? '显示全部' : '仅显示收藏'}</span>
           </button>
         </div>
+
+        {(selection.faceIdStatus === 'normal' || selection.faceIdStatus === 'abnormal') && (
+          <div className={cn(
+            'rounded-xl border-2 p-4 shadow-sm',
+            faceIdStatusConfig[selection.faceIdStatus].bg,
+            faceIdStatusConfig[selection.faceIdStatus].border
+          )}>
+            <div className="flex items-start justify-between">
+              <div className="flex items-start space-x-4">
+                <div className="flex-shrink-0 mt-1">
+                  {faceIdStatusConfig[selection.faceIdStatus].icon}
+                </div>
+                <div className="flex-1">
+                  <h3 className={cn(
+                    'font-semibold',
+                    faceIdStatusConfig[selection.faceIdStatus].text
+                  )}>
+                    Face ID 状态：{faceIdStatusConfig[selection.faceIdStatus].label}
+                  </h3>
+                  <div className="mt-2 flex flex-wrap gap-3 text-sm">
+                    <div className="flex items-center space-x-1.5">
+                      <Smartphone size={14} className="text-primary-500" />
+                      <span className="text-primary-600">机型：<span className="font-medium">{currentModel.name}</span></span>
+                    </div>
+                    {selection.screenGrade && (
+                      <div className="flex items-center space-x-1.5">
+                        <Monitor size={14} className="text-primary-500" />
+                        <span className="text-primary-600">屏幕：<span className="font-medium">{gradeNames[selection.screenGrade]}</span></span>
+                      </div>
+                    )}
+                  </div>
+                  {selection.faceIdStatus === 'abnormal' ? (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-sm font-semibold text-red-700 flex items-center space-x-1.5">
+                        <AlertTriangle size={14} />
+                        <span>更换前检测建议</span>
+                      </p>
+                      <ul className="space-y-1.5 text-sm text-red-600 pl-5 list-disc">
+                        <li>先使用诊断工具检测 Face ID 故障原因，确认是点阵、泛光感应还是红外摄像头问题</li>
+                        <li>检查 Face ID 排线是否有断裂、腐蚀或接触不良痕迹</li>
+                        <li>告知客户：更换屏幕后 Face ID 可能无法恢复，需更换整套 Face ID 组件</li>
+                        <li>建议客户先尝试修复 Face ID 组件，再考虑更换屏幕</li>
+                        <li>记录当前 Face ID 状态，让客户签字确认已知晓风险</li>
+                      </ul>
+                      <div className="mt-3 p-3 bg-red-100/50 rounded-lg border border-red-200">
+                        <p className="text-xs font-semibold text-red-700 mb-1">⚠️ 风险提醒</p>
+                        <p className="text-xs text-red-600">更换屏幕过程中如操作不当，可能导致 Face ID 彻底失效。非原装屏幕可能触发系统面容检测机制，导致面容功能永久锁定。请务必使用原装或经过 MFi 认证的屏幕组件。</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-sm font-semibold text-green-700 flex items-center space-x-1.5">
+                        <ShieldCheck size={14} />
+                        <span>保护建议</span>
+                      </p>
+                      <ul className="space-y-1.5 text-sm text-green-700 pl-5 list-disc">
+                        <li>拆卸屏幕时标记 Face ID 组件位置，避免移位</li>
+                        <li>使用防静电镊子操作，不要触摸点阵投影器和泛光感应元件表面</li>
+                        <li>Face ID 排线避免过度弯折，弯曲半径不小于 5mm</li>
+                        <li>更换屏幕后先测试 Face ID 功能，再完全组装</li>
+                        <li>建议客户设置替用外貌，提高解锁成功率</li>
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-xl border border-primary-200 p-4 shadow-sm">
           <div className="flex flex-wrap gap-2">

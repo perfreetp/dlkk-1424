@@ -15,13 +15,25 @@ import {
   FileText,
   ChevronRight,
   ChevronDown as ChevronDownIcon,
+  Plus,
+  Phone,
+  AlertCircle,
+  RefreshCw,
+  DollarSign,
+  ClipboardList,
+  Check,
+  Trash2,
+  Eye,
+  Save,
 } from 'lucide-react';
 import Layout from '@/components/Layout';
 import { useAppStore, selectHistoryQuotes, selectSelection } from '@/store/useAppStore';
 import { iphoneModels } from '@/data/models';
-import { inventoryItems } from '@/data/inventory';
-import type { InventoryItem, ScreenGrade } from '@/types';
+import { inventoryItems, getInventoryByModelAndGrade } from '@/data/inventory';
+import { getScreenOption } from '@/data/screenOptions';
+import type { InventoryItem, ScreenGrade, HistoryQuote } from '@/types';
 import { cn } from '@/lib/utils';
+import { generateId } from '@/utils/formatter';
 
 type SortKey = 'quantity' | 'purchasePrice' | 'retailPrice' | 'profit';
 type SortDirection = 'asc' | 'desc' | null;
@@ -29,6 +41,16 @@ type SortDirection = 'asc' | 'desc' | null;
 interface SortState {
   key: SortKey | null;
   direction: SortDirection;
+}
+
+interface QuoteFormData {
+  modelId: string;
+  screenGrade: ScreenGrade | '';
+  customerName: string;
+  customerPhone: string;
+  faultDescription: string;
+  laborFee: number;
+  notes: string;
 }
 
 const gradeNames: Record<ScreenGrade, string> = {
@@ -45,6 +67,16 @@ const gradeColors: Record<string, string> = {
   'lcd-replacement': 'bg-primary-100 text-primary-500 border-primary-200',
 };
 
+const defaultFormData: QuoteFormData = {
+  modelId: '',
+  screenGrade: '',
+  customerName: '',
+  customerPhone: '',
+  faultDescription: '',
+  laborFee: 80,
+  notes: '',
+};
+
 export default function Inventory() {
   const navigate = useNavigate();
   const [modelFilter, setModelFilter] = useState<string>('all');
@@ -54,9 +86,17 @@ export default function Inventory() {
   const [sortState, setSortState] = useState<SortState>({ key: null, direction: null });
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showQuoteModal, setShowQuoteModal] = useState(false);
+  const [showQuoteDetailModal, setShowQuoteDetailModal] = useState(false);
+  const [selectedQuote, setSelectedQuote] = useState<HistoryQuote | null>(null);
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [historySearchType, setHistorySearchType] = useState<'all' | 'customer' | 'model'>('all');
+  const [formData, setFormData] = useState<QuoteFormData>(defaultFormData);
+  const [quoteSaved, setQuoteSaved] = useState(false);
 
   const historyQuotes = useAppStore(selectHistoryQuotes);
   const selection = useAppStore(selectSelection);
+  const { addHistoryQuote, removeHistoryQuote } = useAppStore();
 
   const suppliers = useMemo(() => {
     const uniqueSuppliers = [...new Set(inventoryItems.map((item) => item.supplier))];
@@ -119,6 +159,51 @@ export default function Inventory() {
     });
   }, [filteredData, sortState]);
 
+  const filteredHistoryQuotes = useMemo(() => {
+    if (!historySearchQuery.trim()) return historyQuotes;
+    const query = historySearchQuery.toLowerCase();
+    return historyQuotes.filter((quote) => {
+      if (historySearchType === 'customer') {
+        return (
+          quote.customerName?.toLowerCase().includes(query) ||
+          quote.customerPhone?.includes(query)
+        );
+      }
+      if (historySearchType === 'model') {
+        return quote.modelName.toLowerCase().includes(query);
+      }
+      return (
+        quote.customerName?.toLowerCase().includes(query) ||
+        quote.customerPhone?.includes(query) ||
+        quote.modelName.toLowerCase().includes(query) ||
+        quote.gradeName.toLowerCase().includes(query)
+      );
+    });
+  }, [historyQuotes, historySearchQuery, historySearchType]);
+
+  const selectedScreenPrice = useMemo(() => {
+    if (!formData.modelId || !formData.screenGrade) return 0;
+    const option = getScreenOption(formData.modelId, formData.screenGrade as ScreenGrade);
+    return option?.price.retail || 0;
+  }, [formData.modelId, formData.screenGrade]);
+
+  const selectedInventoryItem = useMemo(() => {
+    if (!formData.modelId || !formData.screenGrade) return null;
+    return getInventoryByModelAndGrade(formData.modelId, formData.screenGrade as ScreenGrade);
+  }, [formData.modelId, formData.screenGrade]);
+
+  const lowStockAlternatives = useMemo(() => {
+    if (!selectedInventoryItem || selectedInventoryItem.quantity > selectedInventoryItem.minStock) {
+      return [];
+    }
+    const allModelInventory = inventoryItems.filter(
+      (item) => item.modelId === selectedInventoryItem.modelId && item.id !== selectedInventoryItem.id
+    );
+    return allModelInventory.sort((a, b) => b.quantity - a.quantity);
+  }, [selectedInventoryItem]);
+
+  const totalQuotePrice = selectedScreenPrice + formData.laborFee;
+
   const handleSort = (key: SortKey) => {
     setSortState((prev) => {
       if (prev.key !== key) {
@@ -165,6 +250,68 @@ export default function Inventory() {
     navigate('/compatibility');
   };
 
+  const handleOpenQuoteModal = () => {
+    setFormData({
+      ...defaultFormData,
+      modelId: selection.modelId || '',
+      screenGrade: selection.screenGrade || '',
+      laborFee: 80,
+    });
+    setQuoteSaved(false);
+    setShowQuoteModal(true);
+  };
+
+  const handleFormChange = (field: keyof QuoteFormData, value: string | number) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveQuote = () => {
+    if (!formData.modelId || !formData.screenGrade) return;
+
+    const modelName = getModelName(formData.modelId);
+    const gradeName = gradeNames[formData.screenGrade as ScreenGrade];
+
+    const quote: Omit<HistoryQuote, 'id' | 'createdAt'> = {
+      modelId: formData.modelId,
+      modelName,
+      screenGrade: formData.screenGrade as ScreenGrade,
+      gradeName,
+      screenPrice: selectedScreenPrice,
+      laborFee: formData.laborFee,
+      totalPrice: totalQuotePrice,
+      customerName: formData.customerName || undefined,
+      customerPhone: formData.customerPhone || undefined,
+      faultDescription: formData.faultDescription || undefined,
+      faceIdStatus: selection.faceIdStatus === 'normal' || selection.faceIdStatus === 'abnormal' 
+        ? selection.faceIdStatus 
+        : undefined,
+      notes: formData.notes || undefined,
+    };
+
+    addHistoryQuote(quote);
+    setQuoteSaved(true);
+    setTimeout(() => {
+      setShowQuoteModal(false);
+      setFormData(defaultFormData);
+    }, 1000);
+  };
+
+  const handleViewQuoteDetail = (quote: HistoryQuote) => {
+    setSelectedQuote(quote);
+    setShowQuoteDetailModal(true);
+  };
+
+  const handleDeleteQuote = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('确定要删除这条报价记录吗？')) {
+      removeHistoryQuote(id);
+    }
+  };
+
+  const getBudgetDiff = (price: number, budget: number) => {
+    return price - budget;
+  };
+
   return (
     <Layout>
       <div className="space-y-6">
@@ -183,14 +330,54 @@ export default function Inventory() {
               </p>
             </div>
           </div>
-          <button
-            onClick={() => setShowHistoryModal(true)}
-            className="flex items-center space-x-2 px-4 py-2 bg-success text-white rounded-lg hover:bg-success/90 transition-all shadow-md"
-          >
-            <History size={18} />
-            <span>历史报价</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleOpenQuoteModal}
+              className="flex items-center space-x-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-all shadow-md"
+            >
+              <Plus size={18} />
+              <span>新建报价</span>
+            </button>
+            <button
+              onClick={() => setShowHistoryModal(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-success text-white rounded-lg hover:bg-success/90 transition-all shadow-md"
+            >
+              <History size={18} />
+              <span>历史报价</span>
+            </button>
+          </div>
         </div>
+
+        {selection.modelId && (
+          <div className="bg-primary-50 rounded-xl border border-primary-200 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
+                  <AlertCircle size={20} className="text-success" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-primary-700">
+                    当前已选择：<span className="font-bold">{getModelName(selection.modelId)}</span>
+                    {selection.screenGrade && (
+                      <span className="ml-2">
+                        · <span className="text-success">{gradeNames[selection.screenGrade]}</span>
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-primary-500 mt-0.5">
+                    点击"新建报价"可直接使用当前选择创建报价单
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleOpenQuoteModal}
+                className="px-4 py-2 bg-success text-white text-sm rounded-lg hover:bg-success/90 transition-colors"
+              >
+                快速报价
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-xl border border-primary-200 p-5 shadow-sm">
           <div className="flex items-center space-x-2 mb-4">
@@ -349,6 +536,12 @@ export default function Inventory() {
                   const margin = getProfitMargin(item);
                   const profit = item.retailPrice - item.purchasePrice;
                   const isExpanded = expandedRow === item.id;
+                  const isLowStock = item.quantity <= item.minStock;
+                  const alternatives = isLowStock
+                    ? inventoryItems
+                        .filter((i) => i.modelId === item.modelId && i.id !== item.id && i.quantity > i.minStock)
+                        .sort((a, b) => b.quantity - a.quantity)
+                    : [];
 
                   return (
                     <>
@@ -357,7 +550,8 @@ export default function Inventory() {
                         className={cn(
                           'transition-colors hover:bg-primary-50/50 cursor-pointer',
                           index % 2 === 1 && 'bg-primary-50/30',
-                          isExpanded && 'bg-primary-50'
+                          isExpanded && 'bg-primary-50',
+                          isLowStock && 'bg-red-50/30'
                         )}
                         onClick={() => toggleExpand(item.id)}
                       >
@@ -386,11 +580,11 @@ export default function Inventory() {
                         <td className="px-4 py-3 text-right">
                           <span className={cn(
                             'font-mono font-semibold text-sm',
-                            item.quantity <= item.minStock ? 'text-red-500' : 'text-primary-700'
+                            isLowStock ? 'text-red-500' : 'text-primary-700'
                           )}>
                             {item.quantity.toLocaleString()}
                           </span>
-                          {item.quantity <= item.minStock && (
+                          {isLowStock && (
                             <span className="text-[10px] text-red-500 block">库存不足</span>
                           )}
                         </td>
@@ -434,6 +628,51 @@ export default function Inventory() {
                         <tr className="bg-primary-50/80">
                           <td colSpan={9} className="px-4 py-4">
                             <div className="border-l-4 border-success/30 pl-4">
+                              {isLowStock && alternatives.length > 0 && (
+                                <div className="mb-4 p-4 bg-red-50 rounded-lg border border-red-200">
+                                  <div className="flex items-start space-x-3">
+                                    <AlertCircle size={20} className="text-red-500 flex-shrink-0 mt-0.5" />
+                                    <div className="flex-1">
+                                      <h4 className="text-sm font-semibold text-red-700">
+                                        库存不足警告
+                                      </h4>
+                                      <p className="text-xs text-red-600 mt-1">
+                                        当前库存仅 {item.quantity} 件，低于安全库存 {item.minStock} 件
+                                      </p>
+                                      <div className="mt-3">
+                                        <p className="text-xs font-medium text-primary-700 mb-2">
+                                          推荐替代方案：
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                          {alternatives.map((alt) => (
+                                            <div
+                                              key={alt.id}
+                                              className="flex items-center space-x-2 px-3 py-2 bg-white rounded-lg border border-primary-200"
+                                            >
+                                              <span className={cn(
+                                                'text-xs font-bold px-2 py-0.5 rounded',
+                                                gradeColors[alt.screenGrade]
+                                              )}>
+                                                {gradeNames[alt.screenGrade]}
+                                              </span>
+                                              <span className="text-xs text-primary-600">
+                                                库存: <span className="font-mono text-green-600">{alt.quantity}</span>
+                                              </span>
+                                              <span className="text-xs text-primary-700 font-mono">
+                                                ¥{alt.retailPrice}
+                                              </span>
+                                              <span className="text-[10px] text-primary-400">
+                                                {alt.supplier}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
                               <h4 className="text-sm font-semibold text-primary-700 mb-3 flex items-center space-x-2">
                                 <FileText size={14} />
                                 <span>批次备注详情</span>
@@ -441,22 +680,22 @@ export default function Inventory() {
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                   <div className="flex items-center space-x-2 text-xs text-primary-500">
-                                  <Package size={12} />
-                                  <span>批次号: <span className="font-mono text-primary-700">{item.batchNumber}</span></span>
+                                    <Package size={12} />
+                                    <span>批次号: <span className="font-mono text-primary-700">{item.batchNumber}</span></span>
+                                  </div>
+                                  <div className="flex items-center space-x-2 text-xs text-primary-500">
+                                    <Calendar size={12} />
+                                    <span>入库日期: <span className="text-primary-700">{item.purchaseDate}</span></span>
+                                  </div>
+                                  <div className="flex items-center space-x-2 text-xs text-primary-500">
+                                    <User size={12} />
+                                    <span>库位: <span className="font-mono text-primary-700">{item.location}</span></span>
+                                  </div>
+                                  <div className="flex items-center space-x-2 text-xs text-primary-500">
+                                    <History size={12} />
+                                    <span>更新时间: <span className="text-primary-700">{item.lastUpdated}</span></span>
+                                  </div>
                                 </div>
-                                <div className="flex items-center space-x-2 text-xs text-primary-500">
-                                  <Calendar size={12} />
-                                  <span>入库日期: <span className="text-primary-700">{item.purchaseDate}</span></span>
-                                </div>
-                                <div className="flex items-center space-x-2 text-xs text-primary-500">
-                                  <User size={12} />
-                                  <span>库位: <span className="font-mono text-primary-700">{item.location}</span></span>
-                                </div>
-                                <div className="flex items-center space-x-2 text-xs text-primary-500">
-                                  <History size={12} />
-                                  <span>更新时间: <span className="text-primary-700">{item.lastUpdated}</span></span>
-                                </div>
-                              </div>
                               </div>
                               <div className="mt-4 space-y-2">
                                 {item.batchNotes.map((note, idx) => (
@@ -494,9 +733,276 @@ export default function Inventory() {
         </div>
       </div>
 
+      {showQuoteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
+            <div className="px-6 py-4 border-b border-primary-200 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-primary-800 flex items-center space-x-2">
+                <ClipboardList size={18} />
+                <span>新建接待报价单</span>
+              </h3>
+              <button
+                onClick={() => setShowQuoteModal(false)}
+                className="p-2 rounded-lg hover:bg-primary-100 transition-colors"
+              >
+                <X size={18} className="text-primary-500" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+              {quoteSaved ? (
+                <div className="py-12 text-center">
+                  <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+                    <Check size={32} className="text-green-500" />
+                  </div>
+                  <h3 className="text-xl font-bold text-primary-800 mb-2">报价单已保存</h3>
+                  <p className="text-primary-500">可在历史报价中查看详情</p>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-primary-700">
+                        机型 <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.modelId}
+                        onChange={(e) => handleFormChange('modelId', e.target.value)}
+                        className="w-full px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm text-primary-800 focus:outline-none focus:ring-2 focus:ring-success/30 focus:border-success transition-all"
+                      >
+                        <option value="">请选择机型</option>
+                        {modelOptions.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-primary-700">
+                        屏幕等级 <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.screenGrade}
+                        onChange={(e) => handleFormChange('screenGrade', e.target.value)}
+                        className="w-full px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm text-primary-800 focus:outline-none focus:ring-2 focus:ring-success/30 focus:border-success transition-all"
+                        disabled={!formData.modelId}
+                      >
+                        <option value="">请选择屏幕等级</option>
+                        {(['original', 'refurbished', 'chinese-oled', 'lcd-replacement'] as ScreenGrade[]).map((grade) => (
+                          <option key={grade} value={grade}>
+                            {gradeNames[grade]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {selectedInventoryItem && selectedInventoryItem.quantity <= selectedInventoryItem.minStock && (
+                    <div className="p-4 bg-red-50 rounded-lg border border-red-200">
+                      <div className="flex items-start space-x-3">
+                        <AlertCircle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-red-700">库存不足</p>
+                          <p className="text-xs text-red-600 mt-1">
+                            当前库存仅 {selectedInventoryItem.quantity} 件，建议考虑替代方案
+                          </p>
+                          {lowStockAlternatives.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {lowStockAlternatives.slice(0, 2).map((alt) => (
+                                <button
+                                  key={alt.id}
+                                  onClick={() => handleFormChange('screenGrade', alt.screenGrade)}
+                                  className="text-xs px-2 py-1 bg-white rounded border border-primary-200 hover:border-success hover:text-success transition-colors"
+                                >
+                                  更换为 {gradeNames[alt.screenGrade]} (库存{alt.quantity})
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-primary-700">
+                        <User size={14} className="inline mr-1" />
+                        客户姓名
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.customerName}
+                        onChange={(e) => handleFormChange('customerName', e.target.value)}
+                        placeholder="请输入客户姓名"
+                        className="w-full px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm text-primary-800 focus:outline-none focus:ring-2 focus:ring-success/30 focus:border-success transition-all"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-primary-700">
+                        <Phone size={14} className="inline mr-1" />
+                        联系电话
+                      </label>
+                      <input
+                        type="tel"
+                        value={formData.customerPhone}
+                        onChange={(e) => handleFormChange('customerPhone', e.target.value)}
+                        placeholder="请输入联系电话"
+                        className="w-full px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm text-primary-800 focus:outline-none focus:ring-2 focus:ring-success/30 focus:border-success transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-primary-700">
+                      <AlertCircle size={14} className="inline mr-1" />
+                      故障描述
+                    </label>
+                    <textarea
+                      value={formData.faultDescription}
+                      onChange={(e) => handleFormChange('faultDescription', e.target.value)}
+                      placeholder="请描述手机故障情况，如屏幕碎裂、显示异常、触摸失灵等"
+                      rows={3}
+                      className="w-full px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm text-primary-800 focus:outline-none focus:ring-2 focus:ring-success/30 focus:border-success transition-all resize-none"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-primary-700">
+                      <DollarSign size={14} className="inline mr-1" />
+                      人工费（元）
+                    </label>
+                    <div className="flex items-center space-x-3">
+                      <input
+                        type="number"
+                        value={formData.laborFee}
+                        onChange={(e) => handleFormChange('laborFee', Number(e.target.value))}
+                        min="0"
+                        step="10"
+                        className="w-32 px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm text-primary-800 focus:outline-none focus:ring-2 focus:ring-success/30 focus:border-success transition-all"
+                      />
+                      <div className="flex space-x-2">
+                        {[50, 80, 100, 150].map((fee) => (
+                          <button
+                            key={fee}
+                            onClick={() => handleFormChange('laborFee', fee)}
+                            className={cn(
+                              'px-3 py-1 text-xs rounded-lg transition-colors',
+                              formData.laborFee === fee
+                                ? 'bg-success text-white'
+                                : 'bg-primary-100 text-primary-600 hover:bg-primary-200'
+                            )}
+                          >
+                            ¥{fee}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-primary-700">
+                      <FileText size={14} className="inline mr-1" />
+                      备注
+                    </label>
+                    <textarea
+                      value={formData.notes}
+                      onChange={(e) => handleFormChange('notes', e.target.value)}
+                      placeholder="其他需要记录的信息"
+                      rows={2}
+                      className="w-full px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm text-primary-800 focus:outline-none focus:ring-2 focus:ring-success/30 focus:border-success transition-all resize-none"
+                    />
+                  </div>
+
+                  <div className="bg-primary-50 rounded-lg p-4 border border-primary-200">
+                    <h4 className="text-sm font-semibold text-primary-700 mb-3">报价明细</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-primary-600">屏幕配件</span>
+                        <span className="font-mono text-primary-800">¥{selectedScreenPrice.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-primary-600">人工费</span>
+                        <span className="font-mono text-primary-800">¥{formData.laborFee.toLocaleString()}</span>
+                      </div>
+                      {selection.budget > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-primary-600">客户预算</span>
+                          <span className={cn(
+                            'font-mono',
+                            totalQuotePrice > selection.budget ? 'text-red-500' : 'text-success'
+                          )}>
+                            ¥{selection.budget.toLocaleString()}
+                            {totalQuotePrice > selection.budget && (
+                              <span className="ml-2 text-xs">
+                                (超预算 ¥{getBudgetDiff(totalQuotePrice, selection.budget).toLocaleString()})
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+                      <div className="pt-2 border-t border-primary-200 flex justify-between">
+                        <span className="font-semibold text-primary-800">合计</span>
+                        <span className="text-xl font-bold font-mono text-success">
+                          ¥{totalQuotePrice.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {selection.faceIdStatus !== 'all' && (
+                    <div className={cn(
+                      'p-3 rounded-lg border',
+                      selection.faceIdStatus === 'abnormal' 
+                        ? 'bg-warning/10 border-warning/30' 
+                        : 'bg-success/10 border-success/30'
+                    )}>
+                      <p className={cn(
+                        'text-sm font-medium',
+                        selection.faceIdStatus === 'abnormal' ? 'text-warning-700' : 'text-success-700'
+                      )}>
+                        Face ID 状态：{selection.faceIdStatus === 'normal' ? '正常' : '异常'}
+                      </p>
+                      <p className="text-xs text-primary-600 mt-1">
+                        {selection.faceIdStatus === 'abnormal' 
+                          ? '更换屏幕时需特别注意排线保护，避免进一步损坏 Face ID 组件'
+                          : '请提醒客户保护好面容识别组件，更换时注意排线操作'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {!quoteSaved && (
+              <div className="px-6 py-4 border-t border-primary-200 flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowQuoteModal(false)}
+                  className="px-4 py-2 bg-primary-100 text-primary-600 rounded-lg hover:bg-primary-200 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleSaveQuote}
+                  disabled={!formData.modelId || !formData.screenGrade}
+                  className={cn(
+                    'px-6 py-2 rounded-lg transition-all flex items-center space-x-2',
+                    formData.modelId && formData.screenGrade
+                      ? 'bg-success text-white hover:bg-success/90 shadow-md'
+                      : 'bg-primary-200 text-primary-400 cursor-not-allowed'
+                  )}
+                >
+                  <Save size={16} />
+                  <span>保存报价</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {showHistoryModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-hidden">
             <div className="px-6 py-4 border-b border-primary-200 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-primary-800 flex items-center space-x-2">
                 <History size={18} />
@@ -509,44 +1015,250 @@ export default function Inventory() {
                 <X size={18} className="text-primary-500" />
               </button>
             </div>
-            <div className="p-6 overflow-y-auto max-h-[60vh]">
-              {historyQuotes.length === 0 ? (
+            <div className="p-4 border-b border-primary-200">
+              <div className="flex items-center space-x-3">
+                <div className="flex bg-primary-100 rounded-lg p-1">
+                  {(['all', 'customer', 'model'] as const).map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => setHistorySearchType(type)}
+                      className={cn(
+                        'px-3 py-1 text-xs font-medium rounded-md transition-all',
+                        historySearchType === type
+                          ? 'bg-white text-primary-800 shadow-sm'
+                          : 'text-primary-500 hover:text-primary-700'
+                      )}
+                    >
+                      {type === 'all' ? '全部' : type === 'customer' ? '按客户' : '按机型'}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex-1 relative">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-primary-400" />
+                  <input
+                    type="text"
+                    placeholder={
+                      historySearchType === 'customer'
+                        ? '搜索客户姓名或电话...'
+                        : historySearchType === 'model'
+                        ? '搜索机型名称...'
+                        : '搜索客户、机型...'
+                    }
+                    value={historySearchQuery}
+                    onChange={(e) => setHistorySearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 bg-primary-50 border border-primary-200 rounded-lg text-sm text-primary-800 placeholder-primary-400 focus:outline-none focus:ring-2 focus:ring-success/30 focus:border-success transition-all"
+                  />
+                </div>
+                <button
+                  onClick={() => setHistorySearchQuery('')}
+                  className="p-2 text-primary-400 hover:text-primary-600 transition-colors"
+                >
+                  <RefreshCw size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[calc(85vh-140px)]">
+              {filteredHistoryQuotes.length === 0 ? (
                 <div className="text-center py-12">
                   <History size={40} className="mx-auto text-primary-300 mb-3" />
-                  <p className="text-primary-500">暂无历史报价记录</p>
+                  <p className="text-primary-500">
+                    {historySearchQuery ? '未找到匹配的报价记录' : '暂无历史报价记录'}
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {historyQuotes.map((quote) => (
+                  {filteredHistoryQuotes.map((quote) => (
                     <div
                       key={quote.id}
-                      className="p-4 bg-primary-50 rounded-lg border border-primary-200"
+                      className="p-4 bg-primary-50 rounded-lg border border-primary-200 hover:border-success/50 transition-colors cursor-pointer"
+                      onClick={() => handleViewQuoteDetail(quote)}
                     >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className="font-semibold text-primary-800">{quote.modelName}</h4>
-                          <p className="text-xs text-primary-500 mt-0.5">
-                            {quote.gradeName} • {new Date(quote.createdAt).toLocaleString('zh-CN')}
-                          </p>
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2">
+                            <h4 className="font-semibold text-primary-800">{quote.modelName}</h4>
+                            <span className={cn(
+                              'text-xs font-bold px-2 py-0.5 rounded',
+                              gradeColors[quote.screenGrade]
+                            )}>
+                              {quote.gradeName}
+                            </span>
+                            {quote.faceIdStatus && (
+                              <span className={cn(
+                                'text-xs px-2 py-0.5 rounded',
+                                quote.faceIdStatus === 'abnormal'
+                                  ? 'bg-warning/10 text-warning'
+                                  : 'bg-success/10 text-success'
+                              )}>
+                                Face ID {quote.faceIdStatus === 'normal' ? '正常' : '异常'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center space-x-4 mt-2 text-xs text-primary-500">
+                            <span className="flex items-center space-x-1">
+                              <Calendar size={12} />
+                              <span>{new Date(quote.createdAt).toLocaleString('zh-CN')}</span>
+                            </span>
+                            {quote.customerName && (
+                              <span className="flex items-center space-x-1">
+                                <User size={12} />
+                                <span>{quote.customerName}</span>
+                              </span>
+                            )}
+                            {quote.customerPhone && (
+                              <span className="flex items-center space-x-1">
+                                <Phone size={12} />
+                                <span>{quote.customerPhone}</span>
+                              </span>
+                            )}
+                          </div>
+                          {quote.faultDescription && (
+                            <p className="text-xs text-primary-600 mt-2 line-clamp-1">
+                              故障：{quote.faultDescription}
+                            </p>
+                          )}
                         </div>
-                        <div className="text-right">
-                          <span className="text-xl font-bold font-mono text-success">
+                        <div className="text-right ml-4">
+                          <div className="text-xl font-bold font-mono text-success">
                             ¥{quote.totalPrice.toLocaleString()}
-                          </span>
+                          </div>
+                          <div className="text-[10px] text-primary-400 mt-1">
+                            屏幕 ¥{quote.screenPrice?.toLocaleString() || '0'} + 人工 ¥{quote.laborFee?.toLocaleString() || '0'}
+                          </div>
+                          <div className="flex items-center justify-end space-x-1 mt-2">
+                            <button
+                              onClick={(e) => handleDeleteQuote(quote.id, e)}
+                              className="p-1.5 text-primary-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                            <button className="p-1.5 text-primary-400 hover:text-success hover:bg-success/5 rounded transition-colors">
+                              <Eye size={14} />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                      {quote.customerName && (
-                        <p className="text-xs text-primary-600 mt-2">
-                          客户: {quote.customerName}
-                        </p>
-                      )}
-                      {quote.notes && (
-                        <p className="text-xs text-primary-500 mt-1">{quote.notes}</p>
-                      )}
                     </div>
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showQuoteDetailModal && selectedQuote && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
+            <div className="px-6 py-4 border-b border-primary-200 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-primary-800 flex items-center space-x-2">
+                <FileText size={18} />
+                <span>报价单详情</span>
+              </h3>
+              <button
+                onClick={() => setShowQuoteDetailModal(false)}
+                className="p-2 rounded-lg hover:bg-primary-100 transition-colors"
+              >
+                <X size={18} className="text-primary-500" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
+              <div className="space-y-6">
+                <div className="bg-primary-50 rounded-lg p-4 border border-primary-200">
+                  <h4 className="text-sm font-semibold text-primary-700 mb-3">基本信息</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-primary-500">报价单号</span>
+                      <p className="font-mono text-primary-800 mt-0.5">{selectedQuote.id}</p>
+                    </div>
+                    <div>
+                      <span className="text-primary-500">创建时间</span>
+                      <p className="text-primary-800 mt-0.5">{new Date(selectedQuote.createdAt).toLocaleString('zh-CN')}</p>
+                    </div>
+                    <div>
+                      <span className="text-primary-500">机型</span>
+                      <p className="font-medium text-primary-800 mt-0.5">{selectedQuote.modelName}</p>
+                    </div>
+                    <div>
+                      <span className="text-primary-500">屏幕等级</span>
+                      <p className="font-medium text-primary-800 mt-0.5">{selectedQuote.gradeName}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedQuote.customerName && (
+                  <div className="bg-white rounded-lg p-4 border border-primary-200">
+                    <h4 className="text-sm font-semibold text-primary-700 mb-3">客户信息</h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-primary-500">客户姓名</span>
+                        <p className="font-medium text-primary-800 mt-0.5">{selectedQuote.customerName}</p>
+                      </div>
+                      {selectedQuote.customerPhone && (
+                        <div>
+                          <span className="text-primary-500">联系电话</span>
+                          <p className="font-mono text-primary-800 mt-0.5">{selectedQuote.customerPhone}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {selectedQuote.faultDescription && (
+                  <div className="bg-white rounded-lg p-4 border border-primary-200">
+                    <h4 className="text-sm font-semibold text-primary-700 mb-2">故障描述</h4>
+                    <p className="text-sm text-primary-600">{selectedQuote.faultDescription}</p>
+                  </div>
+                )}
+
+                {selectedQuote.faceIdStatus && (
+                  <div className={cn(
+                    'rounded-lg p-4 border',
+                    selectedQuote.faceIdStatus === 'abnormal'
+                      ? 'bg-warning/10 border-warning/30'
+                      : 'bg-success/10 border-success/30'
+                  )}>
+                    <h4 className={cn(
+                      'text-sm font-semibold mb-2',
+                      selectedQuote.faceIdStatus === 'abnormal' ? 'text-warning-700' : 'text-success-700'
+                    )}>
+                      Face ID 状态：{selectedQuote.faceIdStatus === 'normal' ? '正常' : '异常'}
+                    </h4>
+                    <p className="text-sm text-primary-600">
+                      {selectedQuote.faceIdStatus === 'abnormal'
+                        ? '更换屏幕时需特别注意排线保护，避免进一步损坏 Face ID 组件。建议在更换前向客户说明风险。'
+                        : '请提醒客户保护好面容识别组件，更换时注意排线操作，避免损坏。'}
+                    </p>
+                  </div>
+                )}
+
+                <div className="bg-primary-50 rounded-lg p-4 border border-primary-200">
+                  <h4 className="text-sm font-semibold text-primary-700 mb-3">费用明细</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-primary-600">屏幕配件</span>
+                      <span className="font-mono text-primary-800">¥{selectedQuote.screenPrice?.toLocaleString() || '0'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-primary-600">人工费</span>
+                      <span className="font-mono text-primary-800">¥{selectedQuote.laborFee?.toLocaleString() || '0'}</span>
+                    </div>
+                    <div className="pt-2 border-t border-primary-200 flex justify-between">
+                      <span className="font-semibold text-primary-800">合计</span>
+                      <span className="text-2xl font-bold font-mono text-success">
+                        ¥{selectedQuote.totalPrice.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedQuote.notes && (
+                  <div className="bg-white rounded-lg p-4 border border-primary-200">
+                    <h4 className="text-sm font-semibold text-primary-700 mb-2">备注</h4>
+                    <p className="text-sm text-primary-600">{selectedQuote.notes}</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

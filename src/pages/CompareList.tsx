@@ -22,6 +22,7 @@ import {
   CheckCircle2,
   XCircle,
   FileText,
+  Wallet,
 } from 'lucide-react';
 import Layout from '@/components/Layout';
 import CompareCard from '@/components/CompareCard';
@@ -55,6 +56,8 @@ interface CompareScheme {
   pros: string[];
   cons: string[];
   isRecommended?: boolean;
+  isOverBudget: boolean;
+  budgetDiff: number;
   option: ScreenOption;
 }
 
@@ -66,6 +69,7 @@ interface CompareDimension {
 
 const compareDimensions: CompareDimension[] = [
   { key: 'price', label: '价格', icon: <TrendingUp size={14} /> },
+  { key: 'budgetDiff', label: '预算差额', icon: <Wallet size={14} /> },
   { key: 'warranty', label: '质保期', icon: <Clock size={14} /> },
   { key: 'brightness', label: '亮度', icon: <Sun size={14} /> },
   { key: 'colorAccuracy', label: '色彩准确度', icon: <Palette size={14} /> },
@@ -110,6 +114,8 @@ export default function CompareList() {
     return compareOptions.map((option) => {
       const pros: string[] = [];
       const cons: string[] = [];
+      const isOverBudget = option.price.retail > selection.budget;
+      const budgetDiff = option.price.retail - selection.budget;
 
       if (option.grade === 'original') {
         pros.push('原装品质，显示效果最佳');
@@ -147,16 +153,28 @@ export default function CompareList() {
         warranty: `${option.warrantyMonths} 个月`,
         pros,
         cons,
-        isRecommended: option.grade === 'original' || option.grade === 'refurbished',
+        isRecommended: (option.grade === 'original' || option.grade === 'refurbished') && !isOverBudget,
+        isOverBudget,
+        budgetDiff,
         option,
       };
     });
-  }, [compareOptions]);
+  }, [compareOptions, selection.budget]);
 
-  const getDimensionValue = (option: ScreenOption, dimension: string): string | React.ReactNode => {
+  const getDimensionValue = (option: ScreenOption, dimension: string, scheme?: CompareScheme): string | React.ReactNode => {
     switch (dimension) {
       case 'price':
         return <span className="font-mono font-bold">¥{option.price.retail.toLocaleString()}</span>;
+      case 'budgetDiff':
+        if (!scheme) return '-';
+        return (
+          <span className={cn(
+            'font-mono font-bold',
+            scheme.isOverBudget ? 'text-red-500' : 'text-green-600'
+          )}>
+            {scheme.isOverBudget ? '+' : ''}¥{scheme.budgetDiff.toLocaleString()}
+          </span>
+        );
       case 'warranty':
         return <span className="font-mono">{option.warrantyMonths} 个月</span>;
       case 'brightness':
@@ -251,7 +269,10 @@ export default function CompareList() {
       modelName: currentModel.name,
       screenGrade: recommended.grade,
       gradeName: gradeNames[recommended.grade],
+      screenPrice: recommended.price.retail,
+      laborFee: 0,
       totalPrice: recommended.price.retail,
+      faceIdStatus: selection.faceIdStatus === 'all' ? undefined : selection.faceIdStatus,
       notes: `对比方案: ${compareOptions.map((o) => gradeNames[o.grade]).join(', ')}`,
     });
 
@@ -357,6 +378,44 @@ export default function CompareList() {
           </div>
         </div>
 
+        <div className="bg-primary-50 rounded-xl border border-primary-200 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <Wallet size={24} className="text-success" />
+              <div>
+                <p className="text-sm text-primary-600">客户预算</p>
+                <p className="text-2xl font-bold font-mono text-primary-800">
+                  ¥{selection.budget.toLocaleString()}
+                </p>
+              </div>
+            </div>
+            {compareSchemes.some((s) => s.isOverBudget) && (
+              <div className="flex items-center space-x-2 text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-200">
+                <AlertTriangle size={16} />
+                <span>部分方案超出预算，不推荐选择</span>
+              </div>
+            )}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {compareSchemes.map((scheme) => (
+              <div
+                key={scheme.id}
+                className={cn(
+                  'flex items-center space-x-2 px-3 py-1.5 rounded-lg text-sm',
+                  scheme.isOverBudget
+                    ? 'bg-red-50 border border-red-200 text-red-700'
+                    : 'bg-green-50 border border-green-200 text-green-700'
+                )}
+              >
+                <span className="font-medium">{scheme.name}</span>
+                <span className="font-mono">
+                  {scheme.isOverBudget ? '+' : ''}¥{scheme.budgetDiff.toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="bg-white rounded-xl border border-primary-200 overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -424,14 +483,20 @@ export default function CompareList() {
                         <span>{dim.label}</span>
                       </div>
                     </td>
-                    {compareOptions.map((option) => (
-                      <td
-                        key={option.grade}
-                        className="px-6 py-4 text-center text-sm text-primary-700"
-                      >
-                        {getDimensionValue(option, dim.key)}
-                      </td>
-                    ))}
+                    {compareOptions.map((option) => {
+                      const scheme = compareSchemes.find((s) => s.id === option.grade);
+                      return (
+                        <td
+                          key={option.grade}
+                          className={cn(
+                            'px-6 py-4 text-center text-sm text-primary-700',
+                            dim.key === 'recommendIndex' && scheme?.isOverBudget && 'opacity-50'
+                          )}
+                        >
+                          {getDimensionValue(option, dim.key, scheme)}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -450,7 +515,10 @@ export default function CompareList() {
                 modelName: currentModel.name,
                 screenGrade: grade,
                 gradeName: gradeNames[grade],
+                screenPrice: option.price.retail,
+                laborFee: 0,
                 totalPrice: option.price.retail,
+                faceIdStatus: selection.faceIdStatus === 'all' ? undefined : selection.faceIdStatus,
                 notes: '从对比页面选择',
               });
               navigate('/compatibility');
@@ -502,6 +570,12 @@ export default function CompareList() {
                   <h3 className="font-bold text-primary-800 text-center">{scheme.name}</h3>
                   <p className="text-center text-2xl font-bold font-mono text-success mt-2">
                     ¥{scheme.price.toLocaleString()}
+                  </p>
+                  <p className={cn(
+                    'text-center text-xs font-semibold mt-1',
+                    scheme.isOverBudget ? 'text-red-500' : 'text-green-600'
+                  )}>
+                    预算{scheme.isOverBudget ? '超' : '省'} ¥{Math.abs(scheme.budgetDiff).toLocaleString()}
                   </p>
                   <p className="text-center text-xs text-primary-500 mt-1">
                     质保 {scheme.warranty}

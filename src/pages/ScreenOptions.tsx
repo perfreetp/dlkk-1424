@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Smartphone, Shield, AlertTriangle, Check, Wallet, ListChecks } from 'lucide-react';
+import { ArrowLeft, Smartphone, Shield, AlertTriangle, Check, Wallet, ListChecks, Filter, TrendingUp, TrendingDown } from 'lucide-react';
 import Layout from '@/components/Layout';
 import ScreenCard from '@/components/ScreenCard';
 import ProgressBar from '@/components/ProgressBar';
@@ -39,6 +39,7 @@ interface ScreenParam {
 
 export default function ScreenOptions() {
   const navigate = useNavigate();
+  const [showBudgetOnly, setShowBudgetOnly] = useState(false);
   const selection = useAppStore(selectSelection);
   const compareCount = useAppStore(selectCompareGradesCount);
   const { toggleCompareGrade, clearCompareGrades, setBudget } = useAppStore();
@@ -54,8 +55,12 @@ export default function ScreenOptions() {
 
   const screenOptions = useMemo(() => {
     if (!selection.modelId) return [];
-    return getScreenOptionsByModelId(selection.modelId);
-  }, [selection.modelId]);
+    let options = getScreenOptionsByModelId(selection.modelId);
+    if (showBudgetOnly) {
+      options = options.filter((o) => o.price.retail <= budget);
+    }
+    return options;
+  }, [selection.modelId, showBudgetOnly, budget]);
 
   const buildScreenParams = (option: ScreenOption): ScreenParam[] => {
     const brightnessValue = Math.min(Math.round((option.brightness.typical / 1000) * 100), 100);
@@ -254,11 +259,38 @@ export default function ScreenOptions() {
           </div>
         )}
 
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setShowBudgetOnly(!showBudgetOnly)}
+              className={cn(
+                'flex items-center space-x-2 px-4 py-2 rounded-lg transition-all',
+                showBudgetOnly
+                  ? 'bg-success text-white shadow-md'
+                  : 'bg-primary-100 text-primary-600 hover:bg-primary-200'
+              )}
+            >
+              <Filter size={16} />
+              <span className="text-sm font-medium">
+                {showBudgetOnly ? '显示全部' : '仅看预算内'}
+              </span>
+            </button>
+            {showBudgetOnly && (
+              <span className="text-xs text-primary-500">
+                当前预算 ¥{budget.toLocaleString()}，仅显示 ≤ ¥{budget.toLocaleString()} 以内的方案
+              </span>
+            )}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {screenOptions.map((option) => {
             const isOverBudget = option.price.retail > budget;
+            const budgetDiff = option.price.retail - budget;
             const isSelected = compareList.includes(option.grade);
             const isDisabled = !isSelected && compareCount >= 3;
+            const isRecommended = option.grade === 'original' || option.grade === 'refurbished';
+            const showRecommended = isRecommended && !isOverBudget;
             const params = buildScreenParams(option);
             const riskTips = buildRiskTips(option);
 
@@ -267,12 +299,24 @@ export default function ScreenOptions() {
                 key={option.grade}
                 className={cn(
                   'relative transition-all duration-300',
-                  isOverBudget && 'opacity-50'
+                  isOverBudget && 'opacity-70'
                 )}
               >
+                {showRecommended && (
+                  <div className="absolute -top-2 -left-2 z-10 bg-success text-white text-xs font-bold px-3 py-1 rounded-full shadow-md">
+                    推荐
+                  </div>
+                )}
                 {isOverBudget && (
-                  <div className="absolute -top-2 -right-2 z-10 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md">
-                    超出预算
+                  <div className="absolute -top-2 -right-2 z-10 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md flex items-center space-x-1">
+                    <TrendingUp size={12} />
+                    <span>超 ¥{Math.abs(budgetDiff).toLocaleString()}</span>
+                  </div>
+                )}
+                {!isOverBudget && (
+                  <div className="absolute -top-2 -right-2 z-10 bg-success text-white text-xs font-bold px-3 py-1 rounded-full shadow-md flex items-center space-x-1">
+                    <TrendingDown size={12} />
+                    <span>省 ¥{Math.abs(budgetDiff).toLocaleString()}</span>
                   </div>
                 )}
                 {isDisabled && (

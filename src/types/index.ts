@@ -93,9 +93,14 @@ export type HistoryQuote = {
   modelName: string;
   screenGrade: ScreenGrade;
   gradeName: string;
+  screenPrice: number;
+  laborFee: number;
   totalPrice: number;
   createdAt: string;
   customerName?: string;
+  customerPhone?: string;
+  faultDescription?: string;
+  faceIdStatus?: 'normal' | 'abnormal';
   notes?: string;
 };
 
